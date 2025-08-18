@@ -1,6 +1,6 @@
 // const { PutLogEventsCommand, CreateLogGroupCommand, CreateLogStreamCommand, DescribeLogStreamsCommand } = require('@aws-sdk/client-cloudwatch-logs')
-const CloudWatchClient = require('../../lib/cloudwatch-client')
-const LogItem = require('../../lib/log-item')
+const CloudWatchClient = require('../../src/cloudwatch-client')
+const LogItem = require('../../src/log-item')
 
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'

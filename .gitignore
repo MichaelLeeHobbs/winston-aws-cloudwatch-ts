@@ -6,3 +6,5 @@ node_modules/
 test-results.xml
 coverage/
 .nyc_output/
+.idea
+promptHelper.md

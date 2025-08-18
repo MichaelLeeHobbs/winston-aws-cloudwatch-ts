@@ -1,4 +1,4 @@
-const LogItem = require('../../lib/log-item')
+const LogItem = require('../../src/log-item')
 
 describe('LogItem', () => {
   describe('#date', () => {

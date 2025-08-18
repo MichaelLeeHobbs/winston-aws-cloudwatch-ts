@@ -1,5 +1,5 @@
-const CloudWatchEventFormatter = require('../../lib/cloudwatch-event-formatter')
-const LogItem = require('../../lib/log-item')
+const CloudWatchEventFormatter = require('../../src/cloudwatch-event-formatter')
+const LogItem = require('../../src/log-item')
 
 describe('CloudWatchEventFormatter', () => {
   describe('constructor', () => {

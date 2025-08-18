@@ -1,4 +1,4 @@
-const Queue = require('../../lib/queue')
+const Queue = require('../../src/queue')
 
 const createItem = () => ({ callback () {} })
 

@@ -1,6 +1,6 @@
 const delay = require('delay')
 const ClientMock = require('../lib/client-mock')
-const Relay = require('../../lib/relay')
+const Relay = require('../../src/relay')
 
 const createItem = () => ({ callback: sinon.spy() })
 

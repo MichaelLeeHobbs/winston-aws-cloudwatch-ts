@@ -1,7 +1,7 @@
 {
-  "name": "winston-aws-cloudwatch",
-  "version": "3.0.0",
-  "description": "A Winston transport for Amazon CloudWatch.",
+  "name": "winston-aws-cloudwatch-ts",
+  "version": "4.0.0",
+  "description": "A TypeScript Winston transport for Amazon CloudWatch.",
   "keywords": [
     "amazon",
     "aws",
@@ -15,9 +15,9 @@
   ],
   "author": "Tim De Pauw <hi@tmdpw.eu> (https://tmdpw.eu/)",
   "engines": {
-    "node": ">=8",
-    "yarn": ">=1.6.0"
+    "node": ">=20.9.0"
   },
+  "packageManager": "pnpm@9.15.0",
   "peerDependencies": {
     "winston": "^3.0.0"
   },
@@ -30,6 +30,7 @@
     "winston-transport": "^4.2.0"
   },
   "devDependencies": {
+    "@types/node": "^24.3.0",
     "chai": "^4.0.2",
     "chai-as-promised": "^7.0.0",
     "coveralls": "^3.0.2",
@@ -40,25 +41,33 @@
     "mocha-junit-reporter": "^1.18.0",
     "nyc": "^12.0.2",
     "prettier-standard": "^16.4.1",
+    "prompt-helper": "^2.1.1",
     "rimraf": "^2.6.1",
     "sinon": "^18.0.0",
     "sinon-chai": "^3.7.0",
-    "standard": "^17.1.0"
+    "standard": "^17.1.0",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.2"
   },
   "main": "lib/index.js",
   "files": [
-    "lib/"
+    "lib/",
+    "dist/"
   ],
   "scripts": {
-    "test": "yarn run test:lint && yarn run test:cover",
-    "test:lint": "standard '{lib,test}/**/*.js'",
-    "test:unit": "mocha 'test/lib/setup.js' 'test/**/*.spec.js'",
-    "test:cover": "nyc yarn run test:unit",
-    "test:ci": "yarn run test:lint && yarn run test:ci:cover && yarn run test:ci:report",
-    "test:ci:cover": "nyc mocha --reporter mocha-junit-reporter 'test/lib/setup.js' 'test/**/*.spec.js'",
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist",
+    "test": "pnpm run test:lint && pnpm run test:cover",
+    "test:lint": "standard {lib,test}/**/*.js",
+    "test:unit": "mocha test/lib/setup.js test/**/*.spec.js",
+    "test:cover": "nyc pnpm run test:unit",
+    "test:ci": "pnpm run test:lint && pnpm run test:ci:cover && pnpm run test:ci:report",
+    "test:ci:cover": "nyc mocha --reporter mocha-junit-reporter test/lib/setup.js test/**/*.spec.js",
     "test:ci:report": "nyc report --reporter text-lcov | coveralls",
-    "format": "prettier-standard '{lib,test}/**/*.js'",
-    "precommit": "lint-staged"
+    "format": "prettier-standard {lib,test}/**/*.js",
+    "precommit": "lint-staged",
+    "ph:all": "ph --code lib --code test --code tsconfig.json --code package.json"
   },
   "repository": "timdp/winston-aws-cloudwatch",
   "bugs": "https://github.com/timdp/winston-aws-cloudwatch/issues",
