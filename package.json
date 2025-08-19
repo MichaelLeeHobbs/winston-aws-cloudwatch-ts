@@ -22,11 +22,9 @@
     "winston": "^3.0.0"
   },
   "dependencies": {
-    "@aws-sdk/client-cloudwatch-logs": "^3.600.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.864.0",
     "bottleneck": "^1.16.0",
     "debug": "^3.1.0",
-    "global": "^4.4.0",
-    "lodash.isempty": "^4.2.1",
     "winston-transport": "^4.2.0"
   },
   "devDependencies": {
