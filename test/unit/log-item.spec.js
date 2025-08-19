@@ -1,4 +1,7 @@
-const LogItem = require('../../src/log-item')
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+
+const LogItem = require('../../src/log-item').default
 
 describe('LogItem', () => {
   describe('#date', () => {

@@ -1,4 +1,6 @@
-const Queue = require('../../src/queue')
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+const Queue = require('../../src/queue').default
 
 const createItem = () => ({ callback () {} })
 

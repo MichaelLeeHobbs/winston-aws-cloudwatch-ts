@@ -1,6 +1,9 @@
-const delay = require('delay')
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+
 const ClientMock = require('../lib/client-mock')
-const Relay = require('../../src/relay')
+const Relay = require('../../src/relay').default
+const { setTimeout } = require('timers/promises')
 
 const createItem = () => ({ callback: sinon.spy() })
 
@@ -23,7 +26,7 @@ describe('Relay', () => {
       for (const item of items) {
         relay.submit(item)
       }
-      await delay(submissionInterval * 1.1)
+      await setTimeout(submissionInterval * 1.1)
       expect(client.submitted).to.deep.equal(items)
     })
 
@@ -36,7 +39,7 @@ describe('Relay', () => {
       for (const item of items) {
         relay.submit(item)
       }
-      await delay(submissionInterval * 1.1)
+      await setTimeout(submissionInterval * 1.1)
       expect(items.map(item => item.callback.calledOnce)).to.deep.equal(
         new Array(items.length).fill(true)
       )
@@ -59,7 +62,7 @@ describe('Relay', () => {
 
       const counts = []
       for (let i = 0; i < batches; ++i) {
-        await delay(submissionInterval * 1.1)
+        await setTimeout(submissionInterval * 1.1)
         counts.push(client.submitted.length)
       }
 
@@ -80,7 +83,7 @@ describe('Relay', () => {
       relay.on('error', spy)
       relay.start()
       relay.submit(createItem())
-      await delay(submissionInterval * failures.length * 1.1)
+      await setTimeout(submissionInterval * failures.length * 1.1)
       expect(spy.callCount).to.equal(failures.length)
     })
 
@@ -93,7 +96,7 @@ describe('Relay', () => {
       relay.on('error', spy)
       relay.start()
       relay.submit(createItem())
-      await delay(submissionInterval * failures.length * 1.1)
+      await setTimeout(submissionInterval * failures.length * 1.1)
       expect(spy.callCount).to.equal(0)
     })
   })

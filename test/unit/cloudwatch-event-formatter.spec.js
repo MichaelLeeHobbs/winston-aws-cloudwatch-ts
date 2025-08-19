@@ -1,5 +1,8 @@
-const CloudWatchEventFormatter = require('../../src/cloudwatch-event-formatter')
-const LogItem = require('../../src/log-item')
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+
+const CloudWatchEventFormatter = require('../../src/cloudwatch-event-formatter').default
+const LogItem = require('../../src/log-item').default
 
 describe('CloudWatchEventFormatter', () => {
   describe('constructor', () => {

@@ -1,6 +1,9 @@
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+
 // const { PutLogEventsCommand, CreateLogGroupCommand, CreateLogStreamCommand, DescribeLogStreamsCommand } = require('@aws-sdk/client-cloudwatch-logs')
-const CloudWatchClient = require('../../src/cloudwatch-client')
-const LogItem = require('../../src/log-item')
+const CloudWatchClient = require('../../src/cloudwatch-client').default
+const LogItem = require('../../src/log-item').default
 
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'

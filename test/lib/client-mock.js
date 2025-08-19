@@ -1,3 +1,6 @@
+/* eslint-disable */
+// @ts-nocheck FIXME: once we are ready to convert to TypeScript, remove this
+
 class MockClient {
   constructor (failures = []) {
     this._submitted = []
