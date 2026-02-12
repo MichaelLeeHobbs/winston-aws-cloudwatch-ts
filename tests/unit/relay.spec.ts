@@ -1,46 +1,51 @@
-const delay = require('delay')
-const ClientMock = require('../lib/client-mock')
-const Relay = require('../../lib/relay')
+import { describe, it, expect, jest } from '@jest/globals'
+import MockClient from '../helpers/client-mock'
+import Relay, { type RelayItem } from '../../src/relay'
+import { setTimeout } from 'timers/promises'
 
-const createItem = () => ({ callback: sinon.spy() })
+interface TestItem extends RelayItem {
+  callback: jest.Mock
+}
+
+const createItem = (): TestItem => ({ callback: jest.fn() })
 
 describe('Relay', () => {
-  describe('#start()', () => {
+  describe('start()', () => {
     it('can only be called once', () => {
-      const relay = new Relay(new ClientMock())
+      const relay = new Relay(new MockClient())
       relay.start()
       expect(() => {
         relay.start()
-      }).to.throw(Error)
+      }).toThrow(Error)
     })
 
     it('submits queue items to the client', async () => {
       const submissionInterval = 50
-      const client = new ClientMock()
+      const client = new MockClient<TestItem>()
       const relay = new Relay(client, { submissionInterval })
       relay.start()
       const items = [createItem(), createItem(), createItem()]
       for (const item of items) {
         relay.submit(item)
       }
-      await delay(submissionInterval * 1.1)
-      expect(client.submitted).to.deep.equal(items)
+      await setTimeout(submissionInterval * 1.1)
+      expect(client.submitted).toEqual(items)
     })
 
     it('calls the callback function for every item', async () => {
       const submissionInterval = 50
-      const client = new ClientMock()
+      const client = new MockClient<TestItem>()
       const relay = new Relay(client, { submissionInterval })
       relay.start()
       const items = [createItem(), createItem(), createItem()]
       for (const item of items) {
         relay.submit(item)
       }
-      await delay(submissionInterval * 1.1)
-      expect(items.map(item => item.callback.calledOnce)).to.deep.equal(
-        new Array(items.length).fill(true)
+      await setTimeout(submissionInterval * 1.1)
+      expect(items.map(item => item.callback.mock.calls.length)).toEqual(
+        new Array(items.length).fill(1)
       )
-      expect(items.map(item => item.callback.args[0])).to.deep.equal(
+      expect(items.map(item => item.callback.mock.calls[0])).toEqual(
         new Array(items.length).fill([null, true])
       )
     })
@@ -49,7 +54,7 @@ describe('Relay', () => {
       const submissionInterval = 50
       const batchSize = 10
       const batches = 3
-      const client = new ClientMock()
+      const client = new MockClient<TestItem>()
       const relay = new Relay(client, { submissionInterval, batchSize })
       relay.start()
 
@@ -57,44 +62,44 @@ describe('Relay', () => {
         relay.submit(createItem())
       }
 
-      const counts = []
+      const counts: number[] = []
       for (let i = 0; i < batches; ++i) {
-        await delay(submissionInterval * 1.1)
+        await setTimeout(submissionInterval * 1.1)
         counts.push(client.submitted.length)
       }
 
-      const expected = []
+      const expected: number[] = []
       for (let i = 1; i <= batches; ++i) {
         expected.push(batchSize * i)
       }
 
-      expect(counts).to.deep.equal(expected)
+      expect(counts).toEqual(expected)
     })
 
     it('emits an error event', async () => {
       const submissionInterval = 50
       const failures = ['FAIL', 'FAIL', 'FAIL']
-      const spy = sinon.spy()
-      const client = new ClientMock(failures)
+      const errorSpy = jest.fn()
+      const client = new MockClient<TestItem>(failures)
       const relay = new Relay(client, { submissionInterval })
-      relay.on('error', spy)
+      relay.on('error', errorSpy)
       relay.start()
       relay.submit(createItem())
-      await delay(submissionInterval * failures.length * 1.1)
-      expect(spy.callCount).to.equal(failures.length)
+      await setTimeout(submissionInterval * failures.length * 1.1)
+      expect(errorSpy).toHaveBeenCalledTimes(failures.length)
     })
 
     it('silently handles a DataAlreadyAcceptedException error', async () => {
       const submissionInterval = 50
       const failures = ['DataAlreadyAcceptedException']
-      const spy = sinon.spy()
-      const client = new ClientMock(failures)
+      const errorSpy = jest.fn()
+      const client = new MockClient<TestItem>(failures)
       const relay = new Relay(client, { submissionInterval })
-      relay.on('error', spy)
+      relay.on('error', errorSpy)
       relay.start()
       relay.submit(createItem())
-      await delay(submissionInterval * failures.length * 1.1)
-      expect(spy.callCount).to.equal(0)
+      await setTimeout(submissionInterval * failures.length * 1.1)
+      expect(errorSpy).toHaveBeenCalledTimes(0)
     })
   })
 })

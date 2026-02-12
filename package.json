@@ -1,7 +1,7 @@
 {
-  "name": "winston-aws-cloudwatch",
-  "version": "3.0.0",
-  "description": "A Winston transport for Amazon CloudWatch.",
+  "name": "winston-aws-cloudwatch-ts",
+  "version": "1.0.0",
+  "description": "A TypeScript Winston transport for Amazon CloudWatch.",
   "keywords": [
     "amazon",
     "aws",
@@ -11,73 +11,85 @@
     "logs",
     "logging",
     "cloud",
-    "saas"
+    "typescript"
   ],
   "author": "Tim De Pauw <hi@tmdpw.eu> (https://tmdpw.eu/)",
   "engines": {
-    "node": ">=8",
-    "yarn": ">=1.6.0"
+    "node": ">=20.9.0"
   },
+  "packageManager": "pnpm@9.15.0",
   "peerDependencies": {
     "winston": "^3.0.0"
   },
   "dependencies": {
-    "aws-sdk": "^2.293.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.864.0",
     "bottleneck": "^1.16.0",
     "debug": "^3.1.0",
-    "lodash.isempty": "^4.2.1",
     "winston-transport": "^4.2.0"
   },
   "devDependencies": {
-    "chai": "^4.0.2",
-    "chai-as-promised": "^7.0.0",
-    "coveralls": "^3.0.2",
-    "delay": "^3.0.0",
-    "husky": "^0.14.3",
-    "lint-staged": "^7.2.2",
-    "mocha": "^5.2.0",
-    "mocha-junit-reporter": "^1.18.0",
-    "nyc": "^12.0.2",
-    "prettier-standard": "^8.0.1",
+    "@eslint/js": "^9.33.0",
+    "@jest/globals": "^30.2.0",
+    "@types/debug": "^4.1.12",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.9.0",
+    "@types/sinon": "^17.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.40.0",
+    "@typescript-eslint/parser": "^8.40.0",
+    "eslint": "^9.33.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.3.0",
+    "jest": "^30.2.0",
+    "lint-staged": "^15.2.7",
+    "prettier": "^3.6.2",
     "rimraf": "^2.6.1",
-    "sinon": "^6.1.5",
-    "sinon-chai": "^3.2.0",
-    "standard": "^10.0.0"
+    "sinon": "^18.0.0",
+    "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.40.0"
   },
-  "main": "lib/index.js",
+  "main": "./dist/cjs/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "require": "./dist/cjs/index.js",
+      "default": "./dist/cjs/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
-    "lib/"
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test": "yarn run test:lint && yarn run test:cover",
-    "test:lint": "standard '{lib,test}/**/*.js'",
-    "test:unit": "mocha 'test/lib/setup.js' 'test/**/*.spec.js'",
-    "test:cover": "nyc yarn run test:unit",
-    "test:ci": "yarn run test:lint && yarn run test:ci:cover && yarn run test:ci:report",
-    "test:ci:cover": "nyc mocha --reporter mocha-junit-reporter 'test/lib/setup.js' 'test/**/*.spec.js'",
-    "test:ci:report": "nyc report --reporter text-lcov | coveralls",
-    "format": "prettier-standard '{lib,test}/**/*.js'",
+    "clean": "rimraf dist",
+    "build": "pnpm run clean && pnpm run build:types && pnpm run build:cjs",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:types": "tsc -p tsconfig.types.json",
+    "prepublishOnly": "pnpm run test && pnpm run build",
+    "test": "pnpm run test:format && pnpm run test:lint && pnpm run test:unit",
+    "test:format": "prettier --check \"{src,tests}/**/*.{ts,js,json,md}\"",
+    "test:lint": "eslint",
+    "test:unit": "jest",
+    "test:cover": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:ci": "pnpm run test:format && pnpm run test:lint && pnpm run test:cover",
+    "format": "prettier --write \"{src,tests}/**/*.{ts,js,json,md}\"",
+    "lint": "eslint --fix",
     "precommit": "lint-staged"
   },
-  "repository": "timdp/winston-aws-cloudwatch",
-  "bugs": "https://github.com/timdp/winston-aws-cloudwatch/issues",
-  "license": "MIT",
-  "standard": {
-    "globals": [
-      "describe",
-      "it",
-      "expect",
-      "before",
-      "after",
-      "beforeEach",
-      "afterEach",
-      "sinon"
-    ]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts.git"
   },
+  "bugs": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/issues",
+  "license": "MIT",
   "lint-staged": {
-    "*.js": [
-      "prettier-standard",
-      "git add"
-    ]
+    "*.{ts,js,json,md}": "prettier --write",
+    "*.{ts,js}": "eslint --fix"
   }
 }

@@ -1,50 +1,39 @@
-version: 2.0
+version: 2.1
 
 jobs:
-  node-8:
+  test:
     docker:
-      - image: circleci/node:8-stretch
+      - image: cimg/node:20.9
     working_directory: ~/code
     steps:
-      - run:
-          name: Install Yarn
-          command: |
-            sudo apt-get update
-            sudo apt-get install apt-transport-https
-            curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
-            echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
-            sudo apt-get update
-            sudo rm -f /usr/local/bin/yarn
-            sudo apt-get install --no-install-recommends yarn=1.9.4-1
-      - run:
-          name: Create test result directory
-          command: mkdir -p /tmp/test-results/unit
       - checkout
       - restore_cache:
           keys:
-            - v1-dependencies-{{ checksum "yarn.lock" }}
+            - v2-dependencies-{{ checksum "pnpm-lock.yaml" }}
+            - v2-dependencies-
+      - run:
+          name: Install pnpm
+          command: |
+            sudo corepack enable
+            corepack prepare pnpm@9.15.0 --activate
       - run:
           name: Install dependencies
-          command: yarn
+          command: pnpm install --frozen-lockfile
       - save_cache:
           paths:
             - node_modules
-          key: v1-dependencies-{{ checksum "yarn.lock" }}
+          key: v2-dependencies-{{ checksum "pnpm-lock.yaml" }}
       - run:
-          name: Run tests
-          command: yarn run test:ci
-          environment:
-            MOCHA_FILE: /tmp/test-results/unit/report.xml
+          name: Run tests with coverage
+          command: pnpm run test:ci
       - store_test_results:
-          path: /tmp/test-results
-          when: always
+          path: coverage
       - store_artifacts:
-          path: /tmp/test-results
-          destination: test-results
-          when: always
+          path: coverage
+          destination: coverage
 
 workflows:
   version: 2
-  build:
+  build-and-test:
     jobs:
-      - node-8
+      - test
