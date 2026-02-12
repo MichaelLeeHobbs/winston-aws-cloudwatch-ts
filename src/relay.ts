@@ -12,7 +12,7 @@ export interface RelayOptions {
 
 export const DEFAULT_OPTIONS: RelayOptions = {
   submissionInterval: 2000,
-  batchSize: 20
+  batchSize: 20,
 }
 
 export type LogCallback = (err: unknown, ok?: boolean) => void
@@ -38,7 +38,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   private limiter: Limiter | null
   private queue: Queue<T> | null
 
-  constructor (client: RelayClient<T>, options?: Partial<RelayOptions>) {
+  constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
     super()
     debug('constructor', { client, options })
     this.client = client
@@ -47,9 +47,9 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     this.queue = null
   }
 
-  start (): void {
+  start(): void {
     debug('start')
-    if (this.queue) throw new Error('Already started');
+    if (this.queue) throw new Error('Already started')
     // Bottleneck v1 signature: new Bottleneck(maxConcurrent, minTime, reservoir)
     // We only rely on schedule() here.
     this.limiter = new (Bottleneck as unknown as new (...args: unknown[]) => Limiter)(
@@ -62,14 +62,14 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     void this.limiter.schedule(() => Promise.resolve())
   }
 
-  submit (item: T): void {
+  submit(item: T): void {
     // If not started yet, initialize (optional: keep original behavior and throw instead)
-    if (!this.queue) this.start();
+    if (!this.queue) this.start()
     this.queue!.push(item)
     this.scheduleSubmission()
   }
 
-  private scheduleSubmission (): void {
+  private scheduleSubmission(): void {
     debug('scheduleSubmission')
     this.limiter!.schedule(() => this.submitInternal())
       // Avoid unhandled rejection noise in case submitInternal throws synchronously
@@ -77,7 +77,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
       .catch(err => this.emit('error', err))
   }
 
-  private submitInternal (): Promise<void> {
+  private submitInternal(): Promise<void> {
     if (!this.queue || this.queue.size === 0) {
       debug('submit: queue empty')
       return Promise.resolve()
@@ -95,21 +95,20 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
       .then(() => this.scheduleSubmission())
   }
 
-  private onSubmitted (batch: T[]): void {
+  private onSubmitted(batch: T[]): void {
     debug('onSubmitted', { batch })
     this.queue!.remove(batch.length)
-    for (let i = 0; i < batch.length; ++i) {
-      const item = batch[i]
+    for (const item of batch) {
       item.callback(null, true)
     }
   }
 
-  private onError (err: RelayError, batch: T[]): void {
+  private onError(err: RelayError, batch: T[]): void {
     debug('onError', { error: err })
-    if (err && err.code === 'DataAlreadyAcceptedException') {
+    if (err.code === 'DataAlreadyAcceptedException') {
       // Assume the request got replayed and remove the batch
       this.queue!.remove(batch.length)
-    } else if (err && err.code === 'InvalidSequenceTokenException') {
+    } else if (err.code === 'InvalidSequenceTokenException') {
       // Keep retrying: do nothing; the next scheduled submission will retry
     } else {
       this.emit('error', err)

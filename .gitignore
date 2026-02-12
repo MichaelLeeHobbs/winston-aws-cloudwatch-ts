@@ -2,6 +2,7 @@ Thumbs.db
 .DS_Store
 npm-debug.log
 yarn-error.log
+yarn.lock
 node_modules/
 test-results.xml
 coverage/
@@ -9,3 +10,7 @@ coverage/
 .idea
 promptHelper.md
 /dist/
+*.tsbuildinfo
+.eslintcache
+REVIEW.md
+ESLINT-PRETTIER-MODERNIZATION.md

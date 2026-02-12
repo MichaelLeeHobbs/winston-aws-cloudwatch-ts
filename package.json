@@ -1,6 +1,6 @@
 {
   "name": "winston-aws-cloudwatch-ts",
-  "version": "4.0.0",
+  "version": "1.0.0",
   "description": "A TypeScript Winston transport for Amazon CloudWatch.",
   "keywords": [
     "amazon",
@@ -11,7 +11,7 @@
     "logs",
     "logging",
     "cloud",
-    "saas"
+    "typescript"
   ],
   "author": "Tim De Pauw <hi@tmdpw.eu> (https://tmdpw.eu/)",
   "engines": {
@@ -29,43 +29,31 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
-    "@eslint/json": "^0.13.1",
-    "@eslint/markdown": "^7.1.0",
+    "@jest/globals": "^30.2.0",
     "@types/debug": "^4.1.12",
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.9.0",
+    "@types/sinon": "^17.0.4",
     "@typescript-eslint/eslint-plugin": "^8.40.0",
     "@typescript-eslint/parser": "^8.40.0",
-    "chai": "^4.0.2",
-    "chai-as-promised": "^7.0.0",
-    "coveralls": "^3.0.2",
     "eslint": "^9.33.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-mocha": "^11.1.0",
-    "eslint-plugin-prettier": "^5.5.4",
     "globals": "^16.3.0",
-    "husky": "^0.14.3",
-    "jiti": "^2.5.1",
+    "jest": "^30.2.0",
     "lint-staged": "^15.2.7",
-    "mocha": "^5.2.0",
-    "mocha-junit-reporter": "^1.18.0",
-    "nyc": "^12.0.2",
     "prettier": "^3.6.2",
-    "prompt-helper": "^2.1.1",
     "rimraf": "^2.6.1",
     "sinon": "^18.0.0",
-    "sinon-chai": "^3.7.0",
+    "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
-    "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.40.0"
   },
   "main": "./dist/cjs/index.js",
-  "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "import": "./dist/cjs/index.js",
       "require": "./dist/cjs/index.js",
       "default": "./dist/cjs/index.js"
     },
@@ -73,43 +61,35 @@
   },
   "files": [
     "dist/",
-    "src/"
+    "src/",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "clean": "rimraf dist",
     "build": "pnpm run clean && pnpm run build:types && pnpm run build:cjs",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:types": "tsc -p tsconfig.types.json",
-    "test": "pnpm run test:lint && pnpm run test:cover",
-    "test:lint": "eslint \"{src,test}/**/*.{ts,js}\"",
-    "test:unit": "mocha test/lib/setup.js test/**/*.spec.js",
-    "test:cover": "nyc pnpm run test:unit",
-    "test:ci": "pnpm run test:lint && pnpm run test:ci:cover && pnpm run test:ci:report",
-    "test:ci:cover": "nyc mocha --reporter mocha-junit-reporter test/lib/setup.js test/**/*.spec.js",
-    "test:ci:report": "nyc report --reporter text-lcov | coveralls",
-    "format": "prettier --write \"{src,test}/**/*.{ts,js,json,md}\"",
-    "precommit": "lint-staged",
-    "ph:all": "ph --code src --code test --code tsconfig.base.json --code tsconfig.json --code tsconfig.cjs.json --code tsconfig.types.json --code package.json"
+    "prepublishOnly": "pnpm run test && pnpm run build",
+    "test": "pnpm run test:format && pnpm run test:lint && pnpm run test:unit",
+    "test:format": "prettier --check \"{src,tests}/**/*.{ts,js,json,md}\"",
+    "test:lint": "eslint",
+    "test:unit": "jest",
+    "test:cover": "jest --coverage",
+    "test:watch": "jest --watch",
+    "test:ci": "pnpm run test:format && pnpm run test:lint && pnpm run test:cover",
+    "format": "prettier --write \"{src,tests}/**/*.{ts,js,json,md}\"",
+    "lint": "eslint --fix",
+    "precommit": "lint-staged"
   },
-  "repository": "timdp/winston-aws-cloudwatch",
-  "bugs": "https://github.com/timdp/winston-aws-cloudwatch/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts.git"
+  },
+  "bugs": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/issues",
   "license": "MIT",
-  "standard": {
-    "globals": [
-      "describe",
-      "it",
-      "expect",
-      "before",
-      "after",
-      "beforeEach",
-      "afterEach",
-      "sinon"
-    ]
-  },
   "lint-staged": {
-    "*.js": [
-      "prettier-standard",
-      "git add"
-    ]
+    "*.{ts,js,json,md}": "prettier --write",
+    "*.{ts,js}": "eslint --fix"
   }
 }

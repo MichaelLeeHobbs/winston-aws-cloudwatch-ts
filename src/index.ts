@@ -1,6 +1,7 @@
 import type { TransportStreamOptions } from 'winston-transport'
 import Transport from 'winston-transport'
-import CloudWatchClient from './cloudwatch-client'
+import CloudWatchClient, { type CloudWatchClientOptions } from './cloudwatch-client'
+import type { CloudWatchLogsClientConfig } from '@aws-sdk/client-cloudwatch-logs'
 import LogItem, { type LogCallback } from './log-item'
 import Relay, { type RelayClient, type RelayOptions } from './relay'
 
@@ -10,7 +11,7 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
   logStreamName: string
 
   // CloudWatchClient options
-  awsConfig?: unknown
+  awsConfig?: CloudWatchLogsClientConfig
   formatLog?: (item: LogItem) => string
   formatLogItem?: (item: LogItem) => { message: string; timestamp: number }
   createLogGroup?: boolean
@@ -28,15 +29,24 @@ export default class CloudWatchTransport extends Transport {
   constructor(options: CloudWatchTransportOptions) {
     super(options)
 
+    const clientOptions: Partial<CloudWatchClientOptions> = {
+      awsConfig: options.awsConfig,
+      formatLog: options.formatLog,
+      formatLogItem: options.formatLogItem,
+      createLogGroup: options.createLogGroup,
+      createLogStream: options.createLogStream,
+      submissionRetryCount: options.submissionRetryCount,
+    }
+
     const client: RelayClient<LogItem> = new CloudWatchClient(
       options.logGroupName,
       options.logStreamName,
-      options as unknown as Record<string, unknown>
+      clientOptions
     )
 
     const relayOptions: Partial<RelayOptions> = {
       submissionInterval: options.submissionInterval,
-      batchSize: options.batchSize
+      batchSize: options.batchSize,
     }
 
     this._relay = new Relay<LogItem>(client, relayOptions)
@@ -46,8 +56,8 @@ export default class CloudWatchTransport extends Transport {
 
   // winston-transport expects: log(info, next)
   log(info: Record<string, unknown>, callback: LogCallback): void {
-    const level = String(info.level ?? '')
-    const msg = String(info.message ?? '')
+    const level = typeof info.level === 'string' ? info.level : ''
+    const msg = typeof info.message === 'string' ? info.message : ''
 
     // Copy all fields except level/message as metadata
     const { level: _level, message: _message, ...rest } = info

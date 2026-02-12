@@ -1,31 +1,51 @@
 import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
-import { defineConfig } from "eslint/config";
+import prettierConfig from "eslint-config-prettier";
 
-export default defineConfig([
+export default tseslint.config(
+  // Ignore patterns
   {
-    files: ["**/*.{js,mjs,cjs,ts,mts,cts}"],
     ignores: [
       "**/node_modules/**",
       "**/dist/**",
+      "**/coverage/**",
       "**/.circleci/**",
       "**/.git/**",
       "**/.github/**",
+      "**/*.d.ts",
     ],
-    plugins: { js },
-    extends: ["js/recommended"],
-    languageOptions: { globals: globals.browser },
   },
-  ...tseslint.configs.recommended,
+
+  // Base JavaScript config
+  js.configs.recommended,
+
+  // TypeScript configs
+  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.stylisticTypeChecked,
+
+  // Global settings for TypeScript
   {
-    // Apply rules specifically to TypeScript files
+    languageOptions: {
+      parserOptions: {
+        projectService: {
+          allowDefaultProject: ['eslint.config.mts', 'jest.config.ts'],
+        },
+        tsconfigRootDir: import.meta.dirname,
+      },
+      globals: {
+        ...globals.node,
+        ...globals.es2022,
+      },
+    },
+  },
+
+  // TypeScript-specific rules
+  {
     files: ["**/*.{ts,mts,cts}"],
     rules: {
-      // Disable the base rule to avoid conflicts
-      "no-unused-vars": "off",
       "@typescript-eslint/no-unused-vars": [
-        "warn", // Or "error" for stricter enforcement
+        "warn",
         {
           argsIgnorePattern: "^_",
           varsIgnorePattern: "^_",
@@ -34,6 +54,27 @@ export default defineConfig([
           ignoreRestSiblings: true,
         },
       ],
+      "@typescript-eslint/consistent-type-imports": [
+        "error",
+        { prefer: "type-imports", fixStyle: "inline-type-imports" },
+      ],
+      "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unnecessary-condition": "warn",
     },
   },
-]);
+
+  // Test files - more lenient rules
+  {
+    files: ["tests/**/*.{ts,mts}"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+    },
+  },
+
+  // Disable rules that conflict with Prettier
+  // Must be last to override other configs
+  prettierConfig
+);

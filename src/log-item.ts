@@ -7,7 +7,7 @@ export default class LogItem {
   private readonly _meta: Record<string, unknown> | undefined
   private readonly _callback: LogCallback
 
-  constructor (
+  constructor(
     date: number,
     level: string,
     message: string,
@@ -21,23 +21,23 @@ export default class LogItem {
     this._callback = callback
   }
 
-  get date (): number {
+  get date(): number {
     return this._date
   }
 
-  get level (): string {
+  get level(): string {
     return this._level
   }
 
-  get message (): string {
+  get message(): string {
     return this._message
   }
 
-  get meta (): Record<string, unknown> | undefined {
+  get meta(): Record<string, unknown> | undefined {
     return this._meta
   }
 
-  get callback (): LogCallback {
+  get callback(): LogCallback {
     return this._callback
   }
 }
