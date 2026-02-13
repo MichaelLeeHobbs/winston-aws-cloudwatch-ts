@@ -56,8 +56,9 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   }
 
   stop(): void {
-    this.limiter = null
     this.queue = null
+    void this.limiter?.stop({ dropWaitingJobs: true })
+    this.limiter = null
     this.client.destroy?.()
   }
 
@@ -73,9 +74,11 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   private scheduleSubmission(): void {
     debug('scheduleSubmission')
     this.limiter!.schedule(() => this.submitInternal())
-      // Avoid unhandled rejection noise in case submitInternal throws synchronously
-      // Surface via error event to keep parity with original behavior
-      .catch(err => this.emit('error', err))
+      // Silently discard rejections after stop() (Bottleneck drops queued jobs).
+      // Otherwise surface via error event to keep parity with original behavior.
+      .catch(err => {
+        if (this.queue) this.emit('error', err)
+      })
   }
 
   private submitInternal(): Promise<void> {
