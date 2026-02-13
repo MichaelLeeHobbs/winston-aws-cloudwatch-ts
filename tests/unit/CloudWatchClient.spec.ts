@@ -1,7 +1,46 @@
-import { describe, it, expect } from '@jest/globals'
+import { describe, it, expect, jest, afterEach } from '@jest/globals'
 import sinon from 'sinon'
-import CloudWatchClient, { type CloudWatchClientOptions } from '../../src/cloudwatch-client'
-import LogItem from '../../src/log-item'
+
+// Mock the heavy AWS SDK module to prevent OOM in Jest workers.
+// All send() calls are stubbed by sinon in each test, so the real SDK is never invoked.
+jest.mock('@aws-sdk/client-cloudwatch-logs', () => {
+  class CloudWatchLogsClient {
+    send() {
+      /* stubbed by sinon in tests */
+    }
+    destroy() {}
+  }
+  class CreateLogGroupCommand {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input)
+    }
+  }
+  class CreateLogStreamCommand {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input)
+    }
+  }
+  class DescribeLogStreamsCommand {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input)
+    }
+  }
+  class PutLogEventsCommand {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input)
+    }
+  }
+  return {
+    CloudWatchLogsClient,
+    CreateLogGroupCommand,
+    CreateLogStreamCommand,
+    DescribeLogStreamsCommand,
+    PutLogEventsCommand,
+  }
+})
+
+import CloudWatchClient, { type CloudWatchClientOptions } from '../../src/CloudWatchClient'
+import LogItem from '../../src/LogItem'
 
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'
@@ -41,7 +80,7 @@ const createStreamsResponse = (option: StreamsStrategy, command: CommandWithNext
         })
       }
       return Promise.resolve({
-        logStreams: [{ logStreamName }],
+        logStreams: [{ logStreamName: 'other-stream' }],
         nextToken: 'token2',
       })
     case StreamsStrategy.PAGED_NOT_FOUND:
@@ -114,6 +153,10 @@ const createBatch = (size: number): LogItem[] => {
 }
 
 describe('CloudWatchClient', () => {
+  afterEach(() => {
+    sinon.restore()
+  })
+
   describe('submit()', () => {
     it('calls putLogEvents', async () => {
       const { client, sendStub } = createClient()
@@ -128,7 +171,51 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       await client.submit(batch)
-      expect(sendStub.callCount).toBe(2)
+      // DescribeLogStreams page1 + DescribeLogStreams page2 + PutLogEvents
+      expect(sendStub.callCount).toBe(3)
+    })
+
+    it('rejects non-InvalidSequenceTokenException errors immediately', async () => {
+      const { client } = createClient({
+        putRejectionCode: 'ThrottlingException',
+      })
+      const batch = createBatch(1)
+      await expect(client.submit(batch)).rejects.toThrow('Whoopsie daisies')
+    })
+
+    it('retries initialization after transient failure', async () => {
+      let callCount = 0
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        createLogGroup: true,
+      })
+      const sendStub = sinon
+        .stub(
+          (client as unknown as Record<string, unknown>)._client as Record<string, unknown>,
+          'send'
+        )
+        .callsFake((command: CommandWithNextToken) => {
+          if (command.constructor.name === 'CreateLogGroupCommand') {
+            callCount++
+            if (callCount === 1) {
+              return Promise.reject(new Error('Transient failure'))
+            }
+            return Promise.resolve()
+          } else if (command.constructor.name === 'DescribeLogStreamsCommand') {
+            return Promise.resolve({
+              logStreams: [{ logStreamName }],
+              nextToken: null,
+            })
+          } else if (command.constructor.name === 'PutLogEventsCommand') {
+            return Promise.resolve({ nextSequenceToken: 'tok' })
+          }
+          throw new Error(`Unexpected: ${String(command.constructor.name)}`)
+        })
+
+      const batch = createBatch(1)
+      await expect(client.submit(batch)).rejects.toThrow('Transient failure')
+      // Second attempt should succeed since _initializing was reset
+      await expect(client.submit(batch)).resolves.not.toThrow()
+      expect(sendStub.callCount).toBeGreaterThanOrEqual(4)
     })
 
     it('rejects after retrying upon InvalidSequenceTokenException', async () => {

@@ -4,14 +4,23 @@ const debug = createDebug('winston-aws-cloudwatch:Queue')
 
 export default class Queue<T> {
   private readonly _contents: T[] = []
+  private readonly _maxSize: number
+
+  constructor(maxSize = 0) {
+    this._maxSize = maxSize
+  }
 
   get size(): number {
     return this._contents.length
   }
 
-  push(item: T): void {
+  push(item: T): T | undefined {
     debug('push', { item })
     this._contents.push(item)
+    if (this._maxSize > 0 && this._contents.length > this._maxSize) {
+      return this._contents.shift()
+    }
+    return undefined
   }
 
   head(num: number): T[] {

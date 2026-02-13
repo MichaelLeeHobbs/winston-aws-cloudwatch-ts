@@ -1,6 +1,6 @@
 import createDebug from 'debug'
 import Bottleneck from 'bottleneck'
-import Queue from './queue'
+import Queue from './Queue'
 import { EventEmitter } from 'events'
 
 const debug = createDebug('winston-aws-cloudwatch:Relay')
@@ -8,11 +8,13 @@ const debug = createDebug('winston-aws-cloudwatch:Relay')
 export interface RelayOptions {
   submissionInterval: number
   batchSize: number
+  maxQueueSize: number
 }
 
 export const DEFAULT_OPTIONS: RelayOptions = {
   submissionInterval: 2000,
   batchSize: 20,
+  maxQueueSize: 10_000,
 }
 
 export type LogCallback = (err: unknown, ok?: boolean) => void
@@ -25,17 +27,13 @@ export interface RelayItem {
 // Minimal shape of the client Relay talks to.
 export interface RelayClient<T extends RelayItem> {
   submit(batch: T[]): Promise<void>
-}
-
-// Minimal shape for Bottleneck interface we use.
-interface Limiter {
-  schedule<T>(fn: () => Promise<T>): Promise<T>
+  destroy?(): void
 }
 
 export default class Relay<T extends RelayItem> extends EventEmitter {
   private readonly client: RelayClient<T>
   private readonly options: RelayOptions
-  private limiter: Limiter | null
+  private limiter: Bottleneck | null
   private queue: Queue<T> | null
 
   constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
@@ -50,22 +48,25 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   start(): void {
     debug('start')
     if (this.queue) throw new Error('Already started')
-    // Bottleneck v1 signature: new Bottleneck(maxConcurrent, minTime, reservoir)
-    // We only rely on schedule() here.
-    this.limiter = new (Bottleneck as unknown as new (...args: unknown[]) => Limiter)(
-      1,
-      this.options.submissionInterval,
-      1
-    )
-    this.queue = new Queue<T>()
-    // Initial call to postpone first submission
-    void this.limiter.schedule(() => Promise.resolve())
+    this.limiter = new Bottleneck({
+      maxConcurrent: 1,
+      minTime: this.options.submissionInterval,
+    })
+    this.queue = new Queue<T>(this.options.maxQueueSize)
+  }
+
+  stop(): void {
+    this.limiter = null
+    this.queue = null
+    this.client.destroy?.()
   }
 
   submit(item: T): void {
-    // If not started yet, initialize (optional: keep original behavior and throw instead)
     if (!this.queue) this.start()
-    this.queue!.push(item)
+    const dropped = this.queue!.push(item)
+    if (dropped) {
+      dropped.callback(new Error('Queue overflow: log item dropped'))
+    }
     this.scheduleSubmission()
   }
 

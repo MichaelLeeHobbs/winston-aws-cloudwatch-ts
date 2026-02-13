@@ -32,7 +32,7 @@ pnpm add winston-aws-cloudwatch-ts winston
 
 ```javascript
 const winston = require('winston')
-const CloudWatchTransport = require('winston-aws-cloudwatch-ts')
+const CloudWatchTransport = require('winston-aws-cloudwatch-ts').default
 
 const logger = winston.createLogger({
   transports: [
@@ -58,7 +58,7 @@ const logger = winston.createLogger({
 logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 ```
 
-### TypeScript (ESM)
+### TypeScript
 
 ```typescript
 import winston from 'winston'
@@ -93,8 +93,13 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 | `submissionInterval` | `number` | No | `2000` | Milliseconds between log submissions |
 | `batchSize` | `number` | No | `20` | Maximum number of logs to send in one batch |
 | `submissionRetryCount` | `number` | No | `1` | Number of retries for failed submissions |
+| `timeout` | `number` | No | `10000` | Timeout in ms for each AWS SDK call |
+| `maxQueueSize` | `number` | No | `10000` | Maximum queued log items (0 = unlimited, oldest dropped when full) |
 | `formatLog` | `function` | No | - | Custom function to format log messages |
 | `formatLogItem` | `function` | No | - | Custom function to format log items |
+| `level` | `string` | No | - | Minimum log level for this transport (inherited from Winston) |
+| `silent` | `boolean` | No | `false` | Suppress all output (inherited from Winston) |
+| `handleExceptions` | `boolean` | No | `false` | Handle uncaught exceptions (inherited from Winston) |
 
 ### Custom Formatting
 
@@ -103,7 +108,8 @@ new CloudWatchTransport({
   logGroupName: 'my-app',
   logStreamName: 'my-stream',
   formatLog: (item) => {
-    return `[${item.level}] ${item.message} ${JSON.stringify(item.meta)}`
+    const meta = item.meta ? ` ${JSON.stringify(item.meta)}` : ''
+    return `[${item.level}] ${item.message}${meta}`
   }
 })
 ```

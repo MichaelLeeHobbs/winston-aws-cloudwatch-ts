@@ -1,8 +1,8 @@
 import createDebug from 'debug'
 import CloudWatchEventFormatter, {
   type CloudWatchEventFormatterOptions,
-} from './cloudwatch-event-formatter'
-import type LogItem from './log-item'
+} from './CloudWatchEventFormatter'
+import type LogItem from './LogItem'
 
 import {
   CloudWatchLogsClient,
@@ -22,22 +22,29 @@ export interface CloudWatchClientOptions extends CloudWatchEventFormatterOptions
   createLogGroup?: boolean
   createLogStream?: boolean
   submissionRetryCount?: number
+  timeout?: number
 }
 
 const DEFAULT_OPTIONS = {
   createLogGroup: false,
   createLogStream: false,
   submissionRetryCount: 1,
+  timeout: 10_000,
 } as const satisfies Partial<CloudWatchClientOptions>
 
 interface AwsError extends Error {
   code?: string
 }
 
+function isAwsError(err: unknown): err is AwsError {
+  return err instanceof Error
+}
+
 interface ResolvedOptions {
   createLogGroup: boolean
   createLogStream: boolean
   submissionRetryCount: number
+  timeout: number
 }
 
 export default class CloudWatchClient {
@@ -62,6 +69,7 @@ export default class CloudWatchClient {
       createLogGroup: options?.createLogGroup ?? DEFAULT_OPTIONS.createLogGroup,
       createLogStream: options?.createLogStream ?? DEFAULT_OPTIONS.createLogStream,
       submissionRetryCount: options?.submissionRetryCount ?? DEFAULT_OPTIONS.submissionRetryCount,
+      timeout: options?.timeout ?? DEFAULT_OPTIONS.timeout,
     }
 
     this._formatter = new CloudWatchEventFormatter(options)
@@ -72,78 +80,93 @@ export default class CloudWatchClient {
     this._initializing = null
   }
 
+  destroy(): void {
+    this._client.destroy()
+  }
+
+  private get _abortSignal(): AbortSignal {
+    return AbortSignal.timeout(this._options.timeout)
+  }
+
   async submit(batch: LogItem[]): Promise<void> {
     debug('submit', { batch })
     await this._initialize()
-    return await this._doSubmit(batch, 0)
+    return await this._doSubmit(batch)
   }
 
   private _initialize(): Promise<void> {
-    this._initializing ??= this._maybeCreateLogGroup().then(() => this._maybeCreateLogStream())
+    this._initializing ??= this._maybeCreateLogGroup()
+      .then(() => this._maybeCreateLogStream())
+      .catch((err: unknown) => {
+        // Reset so the next call retries instead of replaying the cached rejection
+        this._initializing = null
+        throw err
+      })
     return this._initializing
   }
 
   private async _maybeCreateLogGroup(): Promise<void> {
     if (!this._options.createLogGroup) {
-      return Promise.resolve()
+      return
     }
     const params = { logGroupName: this._logGroupName }
     try {
-      await this._client.send(new CreateLogGroupCommand(params))
+      await this._client.send(new CreateLogGroupCommand(params), { abortSignal: this._abortSignal })
     } catch (err) {
-      return await this._allowResourceAlreadyExistsException(err as AwsError)
+      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+        throw err
+      }
     }
   }
 
   private async _maybeCreateLogStream(): Promise<void> {
     if (!this._options.createLogStream) {
-      return Promise.resolve()
+      return
     }
     const params = {
       logGroupName: this._logGroupName,
       logStreamName: this._logStreamName,
     }
     try {
-      await this._client.send(new CreateLogStreamCommand(params))
+      await this._client.send(new CreateLogStreamCommand(params), {
+        abortSignal: this._abortSignal,
+      })
     } catch (err) {
-      return await this._allowResourceAlreadyExistsException(err as AwsError)
+      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+        throw err
+      }
     }
   }
 
-  private _allowResourceAlreadyExistsException(err: AwsError): Promise<void> {
-    return err.code === 'ResourceAlreadyExistsException' ? Promise.resolve() : Promise.reject(err)
-  }
-
-  private async _doSubmit(batch: LogItem[], retryCount: number): Promise<void> {
-    try {
-      await this._maybeUpdateSequenceToken()
-      return await this._putLogEventsAndStoreSequenceToken(batch)
-    } catch (err) {
-      return await this._handlePutError(err as AwsError, batch, retryCount)
+  private async _doSubmit(batch: LogItem[]): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await this._maybeUpdateSequenceToken()
+        await this._putLogEventsAndStoreSequenceToken(batch)
+        return
+      } catch (err) {
+        if (!isAwsError(err) || err.code !== 'InvalidSequenceTokenException') {
+          throw err
+        }
+        if (attempt >= this._options.submissionRetryCount) {
+          const error = new Error(
+            'InvalidSequenceTokenException: retry limit exceeded'
+          ) as AwsError & { code: string }
+          error.code = 'InvalidSequenceTokenException'
+          throw error
+        }
+        this._sequenceToken = null
+      }
     }
   }
 
-  private _maybeUpdateSequenceToken(): Promise<void> {
+  private async _maybeUpdateSequenceToken(): Promise<void> {
     // null = unknown (needs fetch); undefined = known empty (new stream)
     if (this._sequenceToken !== null) {
       return Promise.resolve()
     }
-    return this._fetchAndStoreSequenceToken().then(() => undefined)
-  }
-
-  private _handlePutError(err: AwsError, batch: LogItem[], retryCount: number): Promise<void> {
-    if (err.code !== 'InvalidSequenceTokenException') {
-      return Promise.reject(err)
-    }
-    if (retryCount >= this._options.submissionRetryCount) {
-      const error: AwsError & { code: string } = new Error(
-        'InvalidSequenceTokenException: retry limit exceeded'
-      ) as AwsError & { code: string }
-      error.code = 'InvalidSequenceTokenException'
-      return Promise.reject(error)
-    }
-    this._sequenceToken = null
-    return this._doSubmit(batch, retryCount + 1)
+    await this._fetchAndStoreSequenceToken()
+    return undefined
   }
 
   private async _putLogEventsAndStoreSequenceToken(batch: LogItem[]): Promise<void> {
@@ -160,7 +183,7 @@ export default class CloudWatchClient {
       logEvents: batch.map(item => this._formatter.formatLogItem(item)),
       sequenceToken,
     }
-    return this._client.send(new PutLogEventsCommand(params))
+    return this._client.send(new PutLogEventsCommand(params), { abortSignal: this._abortSignal })
   }
 
   private async _fetchAndStoreSequenceToken(): Promise<string | undefined> {
@@ -184,7 +207,8 @@ export default class CloudWatchClient {
           logGroupName: this._logGroupName,
           logStreamNamePrefix: this._logStreamName,
           nextToken,
-        })
+        }),
+        { abortSignal: this._abortSignal }
       )
       const { logStreams = [] } = res
       const match = logStreams.find(ls => ls.logStreamName === this._logStreamName)

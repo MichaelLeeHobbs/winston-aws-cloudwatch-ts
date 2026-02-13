@@ -1,4 +1,4 @@
-import type LogItem from './log-item'
+import type LogItem from './LogItem'
 
 export interface CloudWatchEventFormatterOptions {
   formatLog?: (item: LogItem) => string

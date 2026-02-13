@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import LogItem from '../../src/log-item'
+import LogItem from '../../src/LogItem'
 
 const noop = (): void => undefined
 
