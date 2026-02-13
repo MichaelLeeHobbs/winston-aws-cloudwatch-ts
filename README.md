@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/winston-aws-cloudwatch-ts.svg)](https://www.npmjs.com/package/winston-aws-cloudwatch-ts)
 [![npm downloads](https://img.shields.io/npm/dm/winston-aws-cloudwatch-ts.svg)](https://www.npmjs.com/package/winston-aws-cloudwatch-ts)
-[![Build Status](https://img.shields.io/circleci/project/github/MichaelLeeHobbs/winston-aws-cloudwatch-ts/master.svg?label=build)](https://circleci.com/gh/MichaelLeeHobbs/winston-aws-cloudwatch-ts)
+[![CI](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport for [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/) using AWS SDK v3.

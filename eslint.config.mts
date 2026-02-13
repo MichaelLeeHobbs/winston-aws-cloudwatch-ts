@@ -10,7 +10,6 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/dist/**",
       "**/coverage/**",
-      "**/.circleci/**",
       "**/.git/**",
       "**/.github/**",
       "**/*.d.ts",
