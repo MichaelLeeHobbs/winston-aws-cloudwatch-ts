@@ -124,7 +124,8 @@ export default class CloudWatchClient {
   }
 
   private _maybeUpdateSequenceToken(): Promise<void> {
-    if (this._sequenceToken != null) {
+    // null = unknown (needs fetch); undefined = known empty (new stream)
+    if (this._sequenceToken !== null) {
       return Promise.resolve()
     }
     return this._fetchAndStoreSequenceToken().then(() => undefined)
@@ -136,7 +137,7 @@ export default class CloudWatchClient {
     }
     if (retryCount >= this._options.submissionRetryCount) {
       const error: AwsError & { code: string } = new Error(
-        'Invalid sequence token, will retry'
+        'InvalidSequenceTokenException: retry limit exceeded'
       ) as AwsError & { code: string }
       error.code = 'InvalidSequenceTokenException'
       return Promise.reject(error)
@@ -174,20 +175,22 @@ export default class CloudWatchClient {
     return sequenceToken
   }
 
-  private async _findLogStream(
-    nextToken?: DescribeLogStreamsCommandOutput['nextToken']
-  ): Promise<LogStream> {
-    debug('findLogStream', { nextToken })
-    const params = {
-      logGroupName: this._logGroupName,
-      logStreamNamePrefix: this._logStreamName,
-      nextToken,
-    }
-    const res = await this._client.send(new DescribeLogStreamsCommand(params))
-    const { logStreams = [], nextToken: nt } = res
-    const match = logStreams.find(ls => ls.logStreamName === this._logStreamName)
-    if (match) return match
-    if (nt == null) throw new Error('Log stream not found')
-    return this._findLogStream(nt)
+  private async _findLogStream(): Promise<LogStream> {
+    let nextToken: DescribeLogStreamsCommandOutput['nextToken']
+    do {
+      debug('findLogStream', { nextToken })
+      const res = await this._client.send(
+        new DescribeLogStreamsCommand({
+          logGroupName: this._logGroupName,
+          logStreamNamePrefix: this._logStreamName,
+          nextToken,
+        })
+      )
+      const { logStreams = [] } = res
+      const match = logStreams.find(ls => ls.logStreamName === this._logStreamName)
+      if (match) return match
+      nextToken = res.nextToken
+    } while (nextToken != null)
+    throw new Error('Log stream not found')
   }
 }

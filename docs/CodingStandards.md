@@ -103,9 +103,11 @@ pipeline **must** fail on any issues, treating warnings as errors via ESLint's
 
 ### Rule 3.4: Dependency Management
 
-Dependencies **shall** be pinned to exact semantic versions in `package.json` (
-e.g., `"lodash": "4.17.21"`). Use tools like `npm audit` or `yarn audit` in CI
-to scan for vulnerabilities; fail builds on high-severity issues.
+Dependencies **should** use semver-compatible ranges in `package.json` (e.g.,
+`"^3.864.0"`). Exact pinning is preferred for deployed applications; libraries
+**should** use caret ranges to avoid forcing consumers into exact transitive
+versions. Use tools like `npm audit` or `pnpm audit` in CI to scan for
+vulnerabilities; fail builds on high-severity issues.
 
 - Minimize third-party dependencies; prefer standard library or audited
   internals (e.g., Node.js built-ins over external HTTP clients).

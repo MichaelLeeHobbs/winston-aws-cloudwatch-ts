@@ -12,12 +12,14 @@ const createErrorWithCode = (code: string): Error & { code: string } => {
   return error
 }
 
-enum StreamsStrategy {
-  DEFAULT = 'default',
-  NOT_FOUND = 'notFound',
-  PAGED = 'paged',
-  PAGED_NOT_FOUND = 'pagedNotFound',
-}
+const StreamsStrategy = {
+  DEFAULT: 'default',
+  NOT_FOUND: 'notFound',
+  PAGED: 'paged',
+  PAGED_NOT_FOUND: 'pagedNotFound',
+} as const
+
+type StreamsStrategy = (typeof StreamsStrategy)[keyof typeof StreamsStrategy]
 
 interface CommandWithNextToken {
   nextToken?: string
@@ -134,7 +136,9 @@ describe('CloudWatchClient', () => {
         putRejectionCode: 'InvalidSequenceTokenException',
       })
       const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow('Invalid sequence token, will retry')
+      await expect(client.submit(batch)).rejects.toThrow(
+        'InvalidSequenceTokenException: retry limit exceeded'
+      )
     })
 
     it('rejects if the log stream is not found in a single page', async () => {
