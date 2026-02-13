@@ -145,14 +145,14 @@ describe('Relay', () => {
   })
 
   describe('stop()', () => {
-    it('stops accepting submissions', () => {
+    it('can auto-restart after being stopped', () => {
       const client = new MockClient<TestItem>()
       const relay = createRelay(client, { submissionInterval: 50 })
       relay.start()
       relay.stop()
-      // After stop, submit should auto-start a new instance
+      // submit() after stop() auto-starts a fresh relay without throwing
       relay.submit(createItem())
-      // The relay restarted via auto-start, so this should not throw
+      // Item is queued but not yet processed (no time for async submission)
       expect(client.submitted.length).toBe(0)
     })
   })

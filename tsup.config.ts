@@ -6,6 +6,7 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
+  // Single entry point — no benefit to code splitting; keeps output simple.
   splitting: false,
   treeshake: true,
   minify: false,
