@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import Queue from '../../src/queue'
+import Queue from '../../src/Queue'
 
 interface TestItem {
   callback: () => void
@@ -127,30 +127,35 @@ describe('Queue', () => {
       expect(queue.head(10)).toEqual(items)
     })
   })
+
+  describe('maxSize', () => {
+    it('drops the oldest item when full', () => {
+      const queue = new Queue<TestItem>(3)
+      const items: TestItem[] = []
+      for (let i = 0; i < 3; ++i) {
+        const item = createItem()
+        items.push(item)
+        queue.push(item)
+      }
+      const overflow = createItem()
+      const dropped = queue.push(overflow)
+      expect(dropped).toBe(items[0])
+      expect(queue.size).toBe(3)
+      expect(queue.head(3)).toEqual([items[1], items[2], overflow])
+    })
+
+    it('returns undefined when not full', () => {
+      const queue = new Queue<TestItem>(5)
+      const dropped = queue.push(createItem())
+      expect(dropped).toBeUndefined()
+    })
+
+    it('has no limit when maxSize is 0', () => {
+      const queue = new Queue<TestItem>(0)
+      for (let i = 0; i < 100; ++i) {
+        queue.push(createItem())
+      }
+      expect(queue.size).toBe(100)
+    })
+  })
 })
-import { type RelayClient, type RelayItem } from '../../src/relay'
-
-export class MockClient<T extends RelayItem> implements RelayClient<T> {
-  private _submitted: T[] = []
-  private _failures: string[]
-
-  constructor(failures: string[] = []) {
-    this._failures = [...failures]
-  }
-
-  async submit(batch: T[]): Promise<void> {
-    if (this._failures.length === 0) {
-      this._submitted = this._submitted.concat(batch)
-      return Promise.resolve()
-    } else {
-      const code = this._failures.shift()!
-      const error = new Error(code) as Error & { code: string }
-      error.code = code
-      return Promise.reject(error)
-    }
-  }
-
-  get submitted(): T[] {
-    return this._submitted
-  }
-}

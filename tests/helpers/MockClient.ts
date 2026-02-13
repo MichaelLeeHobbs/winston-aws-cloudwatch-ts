@@ -1,4 +1,4 @@
-import { type RelayClient, type RelayItem } from '../../src/relay'
+import { type RelayClient, type RelayItem } from '../../src/Relay'
 
 export class MockClient<T extends RelayItem> implements RelayClient<T> {
   private _submitted: T[] = []

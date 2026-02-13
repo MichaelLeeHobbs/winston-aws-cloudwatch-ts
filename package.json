@@ -13,7 +13,10 @@
     "cloud",
     "typescript"
   ],
-  "author": "Tim De Pauw <hi@tmdpw.eu> (https://tmdpw.eu/)",
+  "author": "Michael Lee Hobbs <michael.lee.hobbs@gmail.com> (https://github.com/MichaelLeeHobbs)",
+  "contributors": [
+    "Tim De Pauw <hi@tmdpw.eu> (https://tmdpw.eu/)"
+  ],
   "engines": {
     "node": ">=20.9.0"
   },
@@ -23,8 +26,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-logs": "^3.864.0",
-    "bottleneck": "^1.16.0",
-    "debug": "^3.1.0",
+    "bottleneck": "^2.19.5",
+    "debug": "^4.4.3",
     "winston-transport": "^4.2.0"
   },
   "devDependencies": {
@@ -42,20 +45,23 @@
     "jest": "^30.2.0",
     "lint-staged": "^15.2.7",
     "prettier": "^3.6.2",
-    "rimraf": "^2.6.1",
+    "rimraf": "^6.1.2",
     "sinon": "^18.0.0",
     "ts-jest": "^29.4.5",
     "ts-node": "^10.9.2",
+    "tsup": "^8.5.1",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.40.0"
   },
-  "main": "./dist/cjs/index.js",
-  "types": "./dist/types/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/types/index.d.ts",
-      "require": "./dist/cjs/index.js",
-      "default": "./dist/cjs/index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
@@ -66,17 +72,16 @@
     "LICENSE"
   ],
   "scripts": {
-    "clean": "rimraf dist",
-    "build": "pnpm run clean && pnpm run build:types && pnpm run build:cjs",
-    "build:cjs": "tsc -p tsconfig.cjs.json",
-    "build:types": "tsc -p tsconfig.types.json",
+    "clean": "rimraf dist coverage",
+    "build": "tsup",
+    "build:watch": "tsup --watch",
     "prepublishOnly": "pnpm run test && pnpm run build",
     "test": "pnpm run test:format && pnpm run test:lint && pnpm run test:unit",
     "test:format": "prettier --check \"{src,tests}/**/*.{ts,js,json,md}\" \"*.{mts,ts,json}\" \".github/**/*.yml\"",
     "test:lint": "eslint",
-    "test:unit": "jest",
-    "test:cover": "jest --coverage",
-    "test:watch": "jest --watch",
+    "test:unit": "node --max-old-space-size=6144 node_modules/jest/bin/jest.js",
+    "test:cover": "node --max-old-space-size=6144 node_modules/jest/bin/jest.js --coverage",
+    "test:watch": "node --max-old-space-size=6144 node_modules/jest/bin/jest.js --watch",
     "test:ci": "pnpm run test:format && pnpm run test:lint && pnpm run test:cover",
     "format": "prettier --write \"{src,tests}/**/*.{ts,js,json,md}\" \"*.{mts,ts,json}\" \".github/**/*.yml\"",
     "lint": "eslint --fix",
@@ -86,7 +91,10 @@
     "type": "git",
     "url": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts.git"
   },
-  "bugs": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/issues",
+  "homepage": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts#readme",
+  "bugs": {
+    "url": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/issues"
+  },
   "license": "MIT",
   "lint-staged": {
     "*.{ts,js,json,md}": "prettier --write",

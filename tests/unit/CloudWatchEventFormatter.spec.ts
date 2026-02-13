@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from '@jest/globals'
-import CloudWatchEventFormatter from '../../src/cloudwatch-event-formatter'
-import LogItem from '../../src/log-item'
+import CloudWatchEventFormatter from '../../src/CloudWatchEventFormatter'
+import LogItem from '../../src/LogItem'
 
 const noop = (): void => undefined
 

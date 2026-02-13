@@ -28,7 +28,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.mts', 'jest.config.ts'],
+          allowDefaultProject: ['eslint.config.mts', 'jest.config.ts', 'tsup.config.ts'],
         },
         tsconfigRootDir: import.meta.dirname,
       },
@@ -70,6 +70,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/no-empty-function': 'off',
     },
   },
 
