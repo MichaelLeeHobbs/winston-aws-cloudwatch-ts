@@ -14,8 +14,8 @@ export class MockClient<T extends RelayItem> implements RelayClient<T> {
       return Promise.resolve()
     } else {
       const code = this._failures.shift()!
-      const error = new Error(code) as Error & { code: string }
-      error.code = code
+      const error = new Error(code)
+      error.name = code
       return Promise.reject(error)
     }
   }

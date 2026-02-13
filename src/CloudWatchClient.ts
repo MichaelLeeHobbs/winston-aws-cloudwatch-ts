@@ -32,11 +32,7 @@ const DEFAULT_OPTIONS = {
   timeout: 10_000,
 } as const satisfies Partial<CloudWatchClientOptions>
 
-interface AwsError extends Error {
-  code?: string
-}
-
-function isAwsError(err: unknown): err is AwsError {
+function isError(err: unknown): err is Error {
   return err instanceof Error
 }
 
@@ -113,7 +109,7 @@ export default class CloudWatchClient {
     try {
       await this._client.send(new CreateLogGroupCommand(params), { abortSignal: this._abortSignal })
     } catch (err) {
-      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+      if (!isError(err) || err.name !== 'ResourceAlreadyExistsException') {
         throw err
       }
     }
@@ -132,7 +128,7 @@ export default class CloudWatchClient {
         abortSignal: this._abortSignal,
       })
     } catch (err) {
-      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+      if (!isError(err) || err.name !== 'ResourceAlreadyExistsException') {
         throw err
       }
     }
@@ -145,14 +141,14 @@ export default class CloudWatchClient {
         await this._putLogEventsAndStoreSequenceToken(batch)
         return
       } catch (err) {
-        if (!isAwsError(err) || err.code !== 'InvalidSequenceTokenException') {
+        if (!isError(err) || err.name !== 'InvalidSequenceTokenException') {
           throw err
         }
         if (attempt >= this._options.submissionRetryCount) {
           const error = new Error(
             'InvalidSequenceTokenException: retry limit exceeded'
-          ) as AwsError & { code: string }
-          error.code = 'InvalidSequenceTokenException'
+          )
+          error.name = 'InvalidSequenceTokenException'
           throw error
         }
         this._sequenceToken = null

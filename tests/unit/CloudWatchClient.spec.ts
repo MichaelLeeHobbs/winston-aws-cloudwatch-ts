@@ -45,9 +45,9 @@ import LogItem from '../../src/LogItem'
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'
 
-const createErrorWithCode = (code: string): Error & { code: string } => {
-  const error = new Error('Whoopsie daisies') as Error & { code: string }
-  error.code = code
+const createErrorWithCode = (code: string): Error => {
+  const error = new Error('Whoopsie daisies')
+  error.name = code
   return error
 }
 

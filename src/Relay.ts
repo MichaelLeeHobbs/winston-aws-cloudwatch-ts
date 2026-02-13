@@ -35,6 +35,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   private readonly options: RelayOptions
   private limiter: Bottleneck | null
   private queue: Queue<T> | null
+  private _submissionPending = false
 
   constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
     super()
@@ -57,6 +58,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
 
   stop(): void {
     this.queue = null
+    this._submissionPending = false
     void this.limiter?.stop({ dropWaitingJobs: true })
     this.limiter = null
     this.client.destroy?.()
@@ -71,17 +73,22 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     this.scheduleSubmission()
   }
 
+  // Schedules a single Bottleneck job to drain the queue. The guard flag
+  // prevents redundant jobs: only one drain job is active at a time.
+  // After processing a batch, submitInternal() calls this again to continue
+  // draining — an event-loop-mediated iteration bounded by the queue's maxSize.
   private scheduleSubmission(): void {
+    if (this._submissionPending || !this.limiter || !this.queue) return
+    this._submissionPending = true
     debug('scheduleSubmission')
-    this.limiter!.schedule(() => this.submitInternal())
-      // Silently discard rejections after stop() (Bottleneck drops queued jobs).
-      // Otherwise surface via error event to keep parity with original behavior.
-      .catch(err => {
-        if (this.queue) this.emit('error', err)
-      })
+    void this.limiter.schedule(() => this.submitInternal()).catch(err => {
+      this._submissionPending = false
+      if (this.queue) this.emit('error', err)
+    })
   }
 
   private submitInternal(): Promise<void> {
+    this._submissionPending = false
     if (!this.queue || this.queue.size === 0) {
       debug('submit: queue empty')
       return Promise.resolve()
@@ -94,32 +101,30 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
       .submit(batch)
       .then(
         () => this.onSubmitted(batch),
-        (err: RelayError) => this.onError(err, batch)
+        (err: Error) => this.onError(err, batch)
       )
       .then(() => this.scheduleSubmission())
   }
 
   private onSubmitted(batch: T[]): void {
     debug('onSubmitted', { batch })
-    this.queue!.remove(batch.length)
+    if (!this.queue) return
+    this.queue.remove(batch.length)
     for (const item of batch) {
       item.callback(null, true)
     }
   }
 
-  private onError(err: RelayError, batch: T[]): void {
+  private onError(err: Error, batch: T[]): void {
     debug('onError', { error: err })
-    if (err.code === 'DataAlreadyAcceptedException') {
+    if (!this.queue) return
+    if (err.name === 'DataAlreadyAcceptedException') {
       // Assume the request got replayed and remove the batch
-      this.queue!.remove(batch.length)
-    } else if (err.code === 'InvalidSequenceTokenException') {
+      this.queue.remove(batch.length)
+    } else if (err.name === 'InvalidSequenceTokenException') {
       // Keep retrying: do nothing; the next scheduled submission will retry
     } else {
       this.emit('error', err)
     }
   }
-}
-
-interface RelayError extends Error {
-  code?: string
 }
