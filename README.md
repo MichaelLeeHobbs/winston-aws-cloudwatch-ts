@@ -1,34 +1,36 @@
-# winston-aws-cloudwatch-ts
+# @ubercode/winston-cloudwatch
 
-[![npm version](https://img.shields.io/npm/v/winston-aws-cloudwatch-ts.svg)](https://www.npmjs.com/package/winston-aws-cloudwatch-ts)
-[![npm downloads](https://img.shields.io/npm/dm/winston-aws-cloudwatch-ts.svg)](https://www.npmjs.com/package/winston-aws-cloudwatch-ts)
+[![npm version](https://img.shields.io/npm/v/@ubercode/winston-cloudwatch.svg)](https://www.npmjs.com/package/@ubercode/winston-cloudwatch)
+[![npm downloads](https://img.shields.io/npm/dm/@ubercode/winston-cloudwatch.svg)](https://www.npmjs.com/package/@ubercode/winston-cloudwatch)
 [![CI](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/actions/workflows/ci.yml/badge.svg)](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/actions/workflows/ci.yml)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.9.0-green.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport for [Amazon CloudWatch](https://aws.amazon.com/cloudwatch/) using AWS SDK v3.
 
 ## Features
 
-- ✅ **TypeScript** - Full TypeScript support with complete type definitions
-- ✅ **AWS SDK v3** - Uses the modern modular AWS SDK v3
-- ✅ **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
-- ✅ **Automatic Retries** - Handles sequence token errors automatically
-- ✅ **Customizable Formatting** - Flexible log formatting options
-- ✅ **JSON Formatting** - Optional structured JSON log output
-- ✅ **Retention Policies** - Automatic log group retention configuration
-- ✅ **Byte-Aware Batching** - Respects the 1 MB PutLogEvents payload limit
-- ✅ **Graceful Shutdown** - Flush pending logs before process exit
-- ✅ **Client Injection** - Bring your own `CloudWatchLogsClient`
-- ✅ **Well Tested** - 100% test coverage with Jest
+- **TypeScript** - Full TypeScript support with complete type definitions
+- **AWS SDK v3** - Uses the modern modular AWS SDK v3
+- **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
+- **Automatic Retries** - Handles sequence token errors automatically
+- **Customizable Formatting** - Flexible log formatting options
+- **JSON Formatting** - Optional structured JSON log output
+- **Retention Policies** - Automatic log group retention configuration
+- **Byte-Aware Batching** - Respects the 1 MB PutLogEvents payload limit
+- **Graceful Shutdown** - Flush pending logs before process exit
+- **Client Injection** - Bring your own `CloudWatchLogsClient`
+- **Well Tested** - 100% test coverage with Jest
 
 ## Installation
 
 ```bash
-npm install winston-aws-cloudwatch-ts winston
+npm install @ubercode/winston-cloudwatch winston
 # or
-yarn add winston-aws-cloudwatch-ts winston
+yarn add @ubercode/winston-cloudwatch winston
 # or
-pnpm add winston-aws-cloudwatch-ts winston
+pnpm add @ubercode/winston-cloudwatch winston
 ```
 
 ## Usage
@@ -37,7 +39,7 @@ pnpm add winston-aws-cloudwatch-ts winston
 
 ```javascript
 const winston = require('winston')
-const CloudWatchTransport = require('winston-aws-cloudwatch-ts').default
+const CloudWatchTransport = require('@ubercode/winston-cloudwatch').default
 
 const logger = winston.createLogger({
   transports: [
@@ -66,7 +68,7 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 
 ```typescript
 import winston from 'winston'
-import CloudWatchTransport from 'winston-aws-cloudwatch-ts'
+import CloudWatchTransport from '@ubercode/winston-cloudwatch'
 
 const logger = winston.createLogger({
   transports: [
@@ -90,8 +92,8 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 | Option               | Type                         | Required | Default     | Description                                                                                      |
 |----------------------|------------------------------|----------|-------------|--------------------------------------------------------------------------------------------------|
 | `name`               | `string`                     | No       | `cloudwatch`| Transport name used by Winston to identify this transport                                        |
-| `logGroupName`       | `string`                     | ✅ Yes   | -           | CloudWatch log group name (1-512 characters)                                                     |
-| `logStreamName`      | `string`                     | ✅ Yes   | -           | CloudWatch log stream name (1-512 characters)                                                    |
+| `logGroupName`       | `string`                     | Yes      | -           | CloudWatch log group name (1-512 characters)                                                     |
+| `logStreamName`      | `string`                     | Yes      | -           | CloudWatch log stream name (1-512 characters)                                                    |
 | `awsConfig`          | `CloudWatchLogsClientConfig` | No       | `{}`        | AWS SDK v3 client configuration. Ignored when `cloudWatchLogs` is provided                       |
 | `cloudWatchLogs`     | `CloudWatchLogsClient`       | No       | -           | Pre-built AWS SDK client. When provided, `awsConfig` is ignored and the client is not destroyed on close |
 | `createLogGroup`     | `boolean`                    | No       | `false`     | Automatically create log group if it doesn't exist                                               |
@@ -138,6 +140,13 @@ You can also specify a custom timeout in milliseconds:
 await transport.flush(5000) // wait up to 5 seconds
 transport.close()
 ```
+
+## Migration Guides
+
+Coming from another CloudWatch Winston transport? See our migration guides:
+
+- [Migrating from `winston-cloudwatch`](docs/migration-from-winston-cloudwatch.md) (lazywithclass)
+- [Migrating from `winston-aws-cloudwatch`](docs/migration-from-winston-aws-cloudwatch.md) (timdp/pascencio)
 
 ## Error Handling
 
@@ -191,11 +200,11 @@ new CloudWatchTransport({
 
 This is a modernized TypeScript fork of [winston-aws-cloudwatch](https://github.com/timdp/winston-aws-cloudwatch) with the following improvements:
 
-- ✅ Full TypeScript rewrite with proper types
-- ✅ Updated to AWS SDK v3 (modular, tree-shakeable)
-- ✅ Modern testing with Jest (replacing Mocha)
-- ✅ Updated dependencies and security fixes
-- ✅ Better error handling and type safety
+- Full TypeScript rewrite with proper types
+- Updated to AWS SDK v3 (modular, tree-shakeable)
+- Modern testing with Jest (replacing Mocha)
+- Updated dependencies and security fixes
+- Better error handling and type safety
 
 ## Requirements
 

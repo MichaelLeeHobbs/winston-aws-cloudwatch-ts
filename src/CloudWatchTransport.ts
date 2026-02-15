@@ -59,7 +59,7 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
  * @example
  * ```ts
  * import winston from 'winston'
- * import CloudWatchTransport from 'winston-aws-cloudwatch-ts'
+ * import CloudWatchTransport from '@ubercode/winston-cloudwatch'
  *
  * const logger = winston.createLogger({
  *   transports: [
