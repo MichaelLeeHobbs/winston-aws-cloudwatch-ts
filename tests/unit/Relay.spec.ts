@@ -29,12 +29,13 @@ describe('Relay', () => {
   })
 
   describe('start()', () => {
-    it('can only be called once', () => {
+    it('is a no-op if already started', () => {
       const relay = createRelay(new MockClient())
       relay.start()
+      // Second call should not throw
       expect(() => {
         relay.start()
-      }).toThrow(Error)
+      }).not.toThrow()
     })
 
     it('submits queue items to the client', async () => {
@@ -142,6 +143,24 @@ describe('Relay', () => {
       await setTimeout(submissionInterval * 1.1)
       expect(client.submitted).toEqual([item])
     })
+
+    it('calls callback with overflow error when queue is full', () => {
+      const client = new MockClient<TestItem>()
+      const relay = createRelay(client, { submissionInterval: 60_000, maxQueueSize: 2 })
+      relay.start()
+      const item1 = createItem()
+      const item2 = createItem()
+      const item3 = createItem()
+      relay.submit(item1)
+      relay.submit(item2)
+      // Queue is full (size=2). Next submit evicts the oldest item.
+      relay.submit(item3)
+      expect(item1.callback).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'Queue overflow: log item dropped' })
+      )
+      expect(item2.callback).not.toHaveBeenCalled()
+      expect(item3.callback).not.toHaveBeenCalled()
+    })
   })
 
   describe('stop()', () => {
@@ -154,6 +173,86 @@ describe('Relay', () => {
       relay.submit(createItem())
       // Item is queued but not yet processed (no time for async submission)
       expect(client.submitted.length).toBe(0)
+    })
+
+    it('can be called multiple times without throwing', () => {
+      const relay = createRelay(new MockClient())
+      relay.start()
+      relay.stop()
+      expect(() => relay.stop()).not.toThrow()
+    })
+
+    it('notifies pending items with Transport closed error', () => {
+      const client = new MockClient<TestItem>()
+      // Long interval keeps items queued until stop() drains them
+      const relay = createRelay(client, { submissionInterval: 60_000 })
+      relay.start()
+      const items = [createItem(), createItem(), createItem()]
+      for (const item of items) relay.submit(item)
+      relay.stop()
+      for (const item of items) {
+        expect(item.callback).toHaveBeenCalledWith(
+          expect.objectContaining({ message: 'Transport closed' })
+        )
+      }
+    })
+
+    it('does not double-call callbacks when submission completes after stop', async () => {
+      let resolveSubmit!: () => void
+      let signalSubmitCalled!: () => void
+      const submitCalled = new Promise<void>(r => {
+        signalSubmitCalled = r
+      })
+      const client = {
+        submit: () =>
+          new Promise<void>(resolve => {
+            resolveSubmit = resolve
+            signalSubmitCalled()
+          }),
+      }
+      const relay = new Relay<TestItem>(client, { submissionInterval: 10 })
+      relays.push(relay)
+      relay.start()
+      const item = createItem()
+      relay.submit(item)
+      // Wait until Bottleneck fires and client.submit() is in-flight
+      await submitCalled
+      relay.stop()
+      expect(item.callback).toHaveBeenCalledTimes(1)
+      // Resolve the in-flight submission after stop
+      resolveSubmit()
+      await setTimeout(10)
+      // onSubmitted bails because queue is null — no second callback
+      expect(item.callback).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not emit error when submission fails after stop', async () => {
+      let rejectSubmit!: (err: Error) => void
+      let signalSubmitCalled!: () => void
+      const submitCalled = new Promise<void>(r => {
+        signalSubmitCalled = r
+      })
+      const client = {
+        submit: () =>
+          new Promise<void>((_, reject) => {
+            rejectSubmit = reject
+            signalSubmitCalled()
+          }),
+      }
+      const relay = new Relay<TestItem>(client, { submissionInterval: 10 })
+      relays.push(relay)
+      const errorSpy = jest.fn()
+      relay.on('error', errorSpy)
+      relay.start()
+      relay.submit(createItem())
+      // Wait until Bottleneck fires and client.submit() is in-flight
+      await submitCalled
+      relay.stop()
+      // Reject the in-flight submission after stop
+      rejectSubmit(new Error('late failure'))
+      await setTimeout(10)
+      // onError bails because queue is null — no error emitted
+      expect(errorSpy).not.toHaveBeenCalled()
     })
   })
 })

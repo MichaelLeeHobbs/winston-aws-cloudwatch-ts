@@ -20,11 +20,6 @@ jest.mock('@aws-sdk/client-cloudwatch-logs', () => {
       Object.assign(this, input)
     }
   }
-  class DescribeLogStreamsCommand {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input)
-    }
-  }
   class PutLogEventsCommand {
     constructor(input: Record<string, unknown>) {
       Object.assign(this, input)
@@ -34,78 +29,36 @@ jest.mock('@aws-sdk/client-cloudwatch-logs', () => {
     CloudWatchLogsClient,
     CreateLogGroupCommand,
     CreateLogStreamCommand,
-    DescribeLogStreamsCommand,
     PutLogEventsCommand,
   }
 })
 
 import CloudWatchClient, { type CloudWatchClientOptions } from '../../src/CloudWatchClient'
-import LogItem from '../../src/LogItem'
+import { type LogItem } from '../../src/LogItem'
 
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'
 
-const createErrorWithCode = (code: string): Error & { code: string } => {
-  const error = new Error('Whoopsie daisies') as Error & { code: string }
-  error.code = code
+const createErrorWithCode = (code: string): Error => {
+  const error = new Error('Whoopsie daisies')
+  error.name = code
   return error
 }
 
-const StreamsStrategy = {
-  DEFAULT: 'default',
-  NOT_FOUND: 'notFound',
-  PAGED: 'paged',
-  PAGED_NOT_FOUND: 'pagedNotFound',
-} as const
-
-type StreamsStrategy = (typeof StreamsStrategy)[keyof typeof StreamsStrategy]
-
-interface CommandWithNextToken {
-  nextToken?: string
+interface CommandWithName {
   constructor: { name: string }
-}
-
-const createStreamsResponse = (option: StreamsStrategy, command: CommandWithNextToken) => {
-  switch (option) {
-    case StreamsStrategy.DEFAULT:
-      return Promise.resolve({
-        logStreams: [{ logStreamName }],
-        nextToken: null,
-      })
-    case StreamsStrategy.PAGED:
-      if (command.nextToken) {
-        return Promise.resolve({
-          logStreams: [{ logStreamName }],
-          nextToken: null,
-        })
-      }
-      return Promise.resolve({
-        logStreams: [{ logStreamName: 'other-stream' }],
-        nextToken: 'token2',
-      })
-    case StreamsStrategy.PAGED_NOT_FOUND:
-      return Promise.reject(new Error('Log stream not found'))
-    case StreamsStrategy.NOT_FOUND:
-      return Promise.reject(new Error('Log stream not found'))
-  }
 }
 
 interface CreateClientOptions {
   clientOptions?: Partial<CloudWatchClientOptions> | null
-  streamsStrategy?: StreamsStrategy
   groupErrorCode?: string | null
   streamErrorCode?: string | null
   putRejectionCode?: string | null
 }
 
-interface PutLogEventsResponse {
-  nextSequenceToken: string
-}
-
 const createClient = (options?: CreateClientOptions) => {
   const opts: Required<CreateClientOptions> = {
     clientOptions: null,
-    streamsStrategy: StreamsStrategy.DEFAULT,
     groupErrorCode: null,
     streamErrorCode: null,
     putRejectionCode: null,
@@ -114,17 +67,17 @@ const createClient = (options?: CreateClientOptions) => {
 
   const client = new CloudWatchClient(logGroupName, logStreamName, opts.clientOptions ?? undefined)
 
-  let putPromise: Promise<PutLogEventsResponse>
+  let putPromise: Promise<Record<string, unknown>>
   if (opts.putRejectionCode != null) {
     const err = createErrorWithCode(opts.putRejectionCode)
     putPromise = Promise.reject(err)
   } else {
-    putPromise = Promise.resolve({ nextSequenceToken: 'token42' })
+    putPromise = Promise.resolve({})
   }
 
   const sendStub = sinon
-    .stub((client as unknown as Record<string, unknown>)._client as Record<string, unknown>, 'send')
-    .callsFake((command: CommandWithNextToken) => {
+    .stub((client as unknown as Record<string, unknown>).client as Record<string, unknown>, 'send')
+    .callsFake((command: CommandWithName) => {
       if (command.constructor.name === 'PutLogEventsCommand') {
         return putPromise
       } else if (command.constructor.name === 'CreateLogGroupCommand') {
@@ -135,8 +88,6 @@ const createClient = (options?: CreateClientOptions) => {
         return opts.streamErrorCode
           ? Promise.reject(createErrorWithCode(opts.streamErrorCode))
           : Promise.resolve()
-      } else if (command.constructor.name === 'DescribeLogStreamsCommand') {
-        return createStreamsResponse(opts.streamsStrategy, command)
       }
       throw new Error(`Unexpected command: ${String(command.constructor.name)}`)
     })
@@ -144,17 +95,76 @@ const createClient = (options?: CreateClientOptions) => {
   return { client, sendStub }
 }
 
-const createBatch = (size: number): LogItem[] => {
-  const batch: LogItem[] = []
-  for (let i = 0; i < size; ++i) {
-    batch.push(new LogItem(+new Date(), 'info', 'Test', { foo: 'bar' }, () => undefined))
-  }
-  return batch
-}
+const createBatch = (size: number): LogItem[] =>
+  Array.from({ length: size }, () => ({
+    date: +new Date(),
+    level: 'info',
+    message: 'Test',
+    meta: { foo: 'bar' },
+    callback: () => undefined,
+  }))
 
 describe('CloudWatchClient', () => {
   afterEach(() => {
     sinon.restore()
+  })
+
+  describe('constructor validation', () => {
+    it('throws if logGroupName is empty', () => {
+      expect(() => new CloudWatchClient('', logStreamName)).toThrow(
+        'logGroupName must be between 1 and 512 characters'
+      )
+    })
+
+    it('throws if logStreamName is empty', () => {
+      expect(() => new CloudWatchClient(logGroupName, '')).toThrow(
+        'logStreamName must be between 1 and 512 characters'
+      )
+    })
+
+    it('throws if logGroupName exceeds 512 characters', () => {
+      expect(() => new CloudWatchClient('a'.repeat(513), logStreamName)).toThrow(
+        'logGroupName must be between 1 and 512 characters'
+      )
+    })
+
+    it('throws if logStreamName exceeds 512 characters', () => {
+      expect(() => new CloudWatchClient(logGroupName, 'a'.repeat(513))).toThrow(
+        'logStreamName must be between 1 and 512 characters'
+      )
+    })
+
+    it('reports both errors when logGroupName and logStreamName are invalid', () => {
+      expect(() => new CloudWatchClient('', '')).toThrow(
+        'Invalid CloudWatchClient configuration:\n' +
+          '- logGroupName must be between 1 and 512 characters\n' +
+          '- logStreamName must be between 1 and 512 characters'
+      )
+    })
+
+    it('throws if timeout is zero', () => {
+      expect(() => new CloudWatchClient(logGroupName, logStreamName, { timeout: 0 })).toThrow(
+        'timeout must be a finite number greater than 0'
+      )
+    })
+
+    it('throws if timeout is negative', () => {
+      expect(() => new CloudWatchClient(logGroupName, logStreamName, { timeout: -1 })).toThrow(
+        'timeout must be a finite number greater than 0'
+      )
+    })
+
+    it('throws if timeout is NaN', () => {
+      expect(() => new CloudWatchClient(logGroupName, logStreamName, { timeout: NaN })).toThrow(
+        'timeout must be a finite number greater than 0'
+      )
+    })
+
+    it('throws if timeout is Infinity', () => {
+      expect(
+        () => new CloudWatchClient(logGroupName, logStreamName, { timeout: Infinity })
+      ).toThrow('timeout must be a finite number greater than 0')
+    })
   })
 
   describe('submit()', () => {
@@ -162,20 +172,11 @@ describe('CloudWatchClient', () => {
       const { client, sendStub } = createClient()
       const batch = createBatch(1)
       await client.submit(batch)
-      expect(sendStub.callCount).toBe(2)
+      // Just PutLogEvents (no more DescribeLogStreams)
+      expect(sendStub.callCount).toBe(1)
     })
 
-    it('handles log stream paging', async () => {
-      const { client, sendStub } = createClient({
-        streamsStrategy: StreamsStrategy.PAGED,
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
-      // DescribeLogStreams page1 + DescribeLogStreams page2 + PutLogEvents
-      expect(sendStub.callCount).toBe(3)
-    })
-
-    it('rejects non-InvalidSequenceTokenException errors immediately', async () => {
+    it('rejects on PutLogEvents errors', async () => {
       const { client } = createClient({
         putRejectionCode: 'ThrottlingException',
       })
@@ -190,58 +191,28 @@ describe('CloudWatchClient', () => {
       })
       const sendStub = sinon
         .stub(
-          (client as unknown as Record<string, unknown>)._client as Record<string, unknown>,
+          (client as unknown as Record<string, unknown>).client as Record<string, unknown>,
           'send'
         )
-        .callsFake((command: CommandWithNextToken) => {
+        .callsFake((command: CommandWithName) => {
           if (command.constructor.name === 'CreateLogGroupCommand') {
             callCount++
             if (callCount === 1) {
               return Promise.reject(new Error('Transient failure'))
             }
             return Promise.resolve()
-          } else if (command.constructor.name === 'DescribeLogStreamsCommand') {
-            return Promise.resolve({
-              logStreams: [{ logStreamName }],
-              nextToken: null,
-            })
           } else if (command.constructor.name === 'PutLogEventsCommand') {
-            return Promise.resolve({ nextSequenceToken: 'tok' })
+            return Promise.resolve({})
           }
           throw new Error(`Unexpected: ${String(command.constructor.name)}`)
         })
 
       const batch = createBatch(1)
       await expect(client.submit(batch)).rejects.toThrow('Transient failure')
-      // Second attempt should succeed since _initializing was reset
+      // Second attempt should succeed since initializing was reset
       await expect(client.submit(batch)).resolves.not.toThrow()
-      expect(sendStub.callCount).toBeGreaterThanOrEqual(4)
-    })
-
-    it('rejects after retrying upon InvalidSequenceTokenException', async () => {
-      const { client } = createClient({
-        putRejectionCode: 'InvalidSequenceTokenException',
-      })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow(
-        'InvalidSequenceTokenException: retry limit exceeded'
-      )
-    })
-
-    it('rejects if the log stream is not found in a single page', async () => {
-      const { client } = createClient({
-        streamsStrategy: StreamsStrategy.NOT_FOUND,
-      })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow()
-    })
-
-    it('rejects if the log stream is not found in multiple pages', async () => {
-      const { client } = createClient({
-        streamsStrategy: StreamsStrategy.PAGED_NOT_FOUND,
-      })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow()
+      // CreateLogGroup(fail) + CreateLogGroup(ok) + PutLogEvents
+      expect(sendStub.callCount).toBeGreaterThanOrEqual(3)
     })
   })
 
@@ -301,7 +272,8 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       await client.submit(batch)
-      expect(sendStub.callCount).toBe(3)
+      // CreateLogGroup + PutLogEvents
+      expect(sendStub.callCount).toBe(2)
     })
 
     it('does not throw if the log group already exists', async () => {
@@ -330,7 +302,8 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       await client.submit(batch)
-      expect(sendStub.callCount).toBe(3)
+      // CreateLogStream + PutLogEvents
+      expect(sendStub.callCount).toBe(2)
     })
 
     it('does not throw if the log stream already exists', async () => {

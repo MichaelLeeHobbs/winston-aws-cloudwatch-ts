@@ -1,43 +1,16 @@
+/** Callback invoked when a log item has been processed or an error occurs. */
 export type LogCallback = (err: unknown, ok?: boolean) => void
 
-export default class LogItem {
-  private readonly _date: number
-  private readonly _level: string
-  private readonly _message: string
-  private readonly _meta: Record<string, unknown> | undefined
-  private readonly _callback: LogCallback
-
-  constructor(
-    date: number,
-    level: string,
-    message: string,
-    meta: Record<string, unknown> | undefined,
-    callback: LogCallback
-  ) {
-    this._date = date
-    this._level = level
-    this._message = message
-    this._meta = meta
-    this._callback = callback
-  }
-
-  get date(): number {
-    return this._date
-  }
-
-  get level(): string {
-    return this._level
-  }
-
-  get message(): string {
-    return this._message
-  }
-
-  get meta(): Record<string, unknown> | undefined {
-    return this._meta
-  }
-
-  get callback(): LogCallback {
-    return this._callback
-  }
+/** Immutable value object representing a single log entry in the pipeline. */
+export interface LogItem {
+  /** Timestamp in milliseconds since epoch. */
+  readonly date: number
+  /** Log level (e.g. `'info'`, `'error'`). */
+  readonly level: string
+  /** Log message text. */
+  readonly message: string
+  /** Optional metadata key-value pairs attached to the log entry. */
+  readonly meta?: Readonly<Record<string, unknown>>
+  /** Callback invoked after the item is submitted or dropped. */
+  readonly callback: LogCallback
 }
