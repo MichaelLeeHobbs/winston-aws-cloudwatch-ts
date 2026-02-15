@@ -1,0 +1,88 @@
+import { describe, it, expect } from 'vitest';
+import * as fc from 'fast-check';
+import { create${DOMAIN_TYPE} } from './${MODULE_NAME}.js';
+import { create${BRANDED_TYPE} } from './schema.js';
+
+describe('${MODULE_NAME}', () => {
+  describe('create${DOMAIN_TYPE}', () => {
+    it('should create a valid ${DOMAIN_TYPE} from correct input', () => {
+      const input = {
+        // TODO: fill in valid input matching ${DOMAIN_TYPE}Schema
+      };
+
+      const result = create${DOMAIN_TYPE}(input);
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        // TODO: assert on result.value properties
+      }
+    });
+
+    it('should return error for invalid input', () => {
+      const result = create${DOMAIN_TYPE}({});
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toBeInstanceOf(Error);
+      }
+    });
+
+    it('should return error for null input', () => {
+      const result = create${DOMAIN_TYPE}(null);
+      expect(result.ok).toBe(false);
+    });
+
+    it('should return error for undefined input', () => {
+      const result = create${DOMAIN_TYPE}(undefined);
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('create${BRANDED_TYPE}', () => {
+    it('should create a branded value from valid input', () => {
+      // TODO: provide valid raw value
+      const result = create${BRANDED_TYPE}('valid-value');
+      expect(result.ok).toBe(true);
+    });
+
+    it('should reject invalid branded values', () => {
+      const result = create${BRANDED_TYPE}('');
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('property-based tests', () => {
+    it('should round-trip valid ${DOMAIN_TYPE} data', () => {
+      fc.assert(
+        fc.property(
+          fc.record({
+            // TODO: define fast-check arbitraries matching ${DOMAIN_TYPE}Schema
+            // Example: id: fc.uuid(), name: fc.string({ minLength: 1, maxLength: 100 })
+          }),
+          (input) => {
+            const result = create${DOMAIN_TYPE}(input);
+            // Valid input should always succeed
+            expect(result.ok).toBe(true);
+          },
+        ),
+        { numRuns: 100 }, // Upper bound for test iterations (Rule 8.1)
+      );
+    });
+
+    it('should reject arbitrary objects that do not match schema', () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            fc.integer(),
+            fc.boolean(),
+            fc.constant(null),
+            fc.constant(undefined),
+          ),
+          (input) => {
+            const result = create${DOMAIN_TYPE}(input);
+            expect(result.ok).toBe(false);
+          },
+        ),
+        { numRuns: 100 },
+      );
+    });
+  });
+});

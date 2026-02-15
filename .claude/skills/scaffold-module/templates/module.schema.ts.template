@@ -1,0 +1,65 @@
+/**
+ * Schema definitions and branded types for the ${MODULE_NAME} module.
+ *
+ * All external inputs are validated through Zod schemas (Rule 7.2).
+ * Domain primitives use branded types to prevent misuse (Rule 7.3).
+ *
+ * @module ${MODULE_NAME}/schema
+ */
+
+import { z } from 'zod';
+import type { Result } from '../utils/result.js';
+import type { BrandedString } from '../utils/branded-types.js';
+import { makeStringFactory } from '../utils/branded-types.js';
+
+// ---------------------------------------------------------------------------
+// Branded Types (Rule 7.3)
+// ---------------------------------------------------------------------------
+
+/** Branded type for ${BRANDED_TYPE} identifiers. */
+export type ${BRANDED_TYPE} = BrandedString<'${BRANDED_TYPE}'>;
+
+/**
+ * Creates a validated ${BRANDED_TYPE}.
+ *
+ * @param value - Raw string to validate and brand
+ * @returns Result containing the branded value or a validation error
+ */
+export const create${BRANDED_TYPE}: (
+  value: string,
+) => Result<${BRANDED_TYPE}> = makeStringFactory<'${BRANDED_TYPE}'>(
+  '${BRANDED_TYPE}',
+  (value) => value.length > 0 && value.length <= 255,
+);
+
+// ---------------------------------------------------------------------------
+// Zod Schemas (Rule 7.2)
+// ---------------------------------------------------------------------------
+
+/** Schema for validating ${DOMAIN_TYPE} objects at runtime boundaries. */
+export const ${DOMAIN_TYPE}Schema = z.object({
+  // TODO: Define schema fields based on domain requirements
+  // Example:
+  // id: z.string().min(1).max(255),
+  // name: z.string().min(1).max(100),
+  // status: z.enum(['active', 'inactive', 'archived']),
+  // createdAt: z.coerce.date(),
+});
+
+/** Inferred TypeScript type from the Zod schema. All properties are readonly (Rule 7.1). */
+export type ${DOMAIN_TYPE} = Readonly<z.infer<typeof ${DOMAIN_TYPE}Schema>>;
+
+// ---------------------------------------------------------------------------
+// Status / Discriminated Union (Rule 8.3)
+// ---------------------------------------------------------------------------
+
+// Uncomment and customize if the module has state variants:
+//
+// const ${DOMAIN_TYPE}Status = {
+//   ACTIVE: 'ACTIVE',
+//   INACTIVE: 'INACTIVE',
+//   ARCHIVED: 'ARCHIVED',
+// } as const;
+//
+// type ${DOMAIN_TYPE}StatusValue =
+//   typeof ${DOMAIN_TYPE}Status[keyof typeof ${DOMAIN_TYPE}Status];

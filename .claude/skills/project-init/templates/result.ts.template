@@ -1,0 +1,149 @@
+/**
+ * Result type for recoverable error handling (Rule 6.2).
+ *
+ * Functions that can fail return Result<T, E> instead of throwing,
+ * forcing explicit error handling at the call site.
+ *
+ * @example
+ * ```ts
+ * function divide(a: number, b: number): Result<number> {
+ *   if (b === 0) {
+ *     return { ok: false, error: new Error('Division by zero') };
+ *   }
+ *   return { ok: true, value: a / b };
+ * }
+ *
+ * const result = divide(10, 2);
+ * if (result.ok) {
+ *   console.log(result.value); // 5
+ * } else {
+ *   console.error(result.error.message);
+ * }
+ * ```
+ */
+export type Result<T, E = Error> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly error: E extends Error ? E : Error };
+
+/**
+ * Wraps a synchronous function call in a Result.
+ *
+ * @param fn - The function to execute
+ * @param mapError - Optional error mapper to transform caught errors
+ * @returns Result containing either the return value or a mapped error
+ *
+ * @example
+ * ```ts
+ * const result = tryCatchSync(() => JSON.parse(input));
+ * if (!result.ok) {
+ *   console.error('Invalid JSON:', result.error.message);
+ * }
+ * ```
+ */
+export function tryCatchSync<T>(
+  fn: () => T,
+  mapError?: (error: unknown) => Error,
+): Result<T> {
+  try {
+    return { ok: true, value: fn() };
+  } catch (error: unknown) {
+    const mapped = mapError
+      ? mapError(error)
+      : error instanceof Error
+        ? error
+        : new Error(String(error));
+    return { ok: false, error: mapped };
+  }
+}
+
+/**
+ * Wraps a Promise in a Result, catching rejections.
+ *
+ * @param promise - The promise to wrap
+ * @param mapError - Optional error mapper to transform caught errors
+ * @returns Promise resolving to a Result
+ *
+ * @example
+ * ```ts
+ * const result = await tryCatch(fetch('/api/data'));
+ * if (!result.ok) {
+ *   console.error('Fetch failed:', result.error.message);
+ * }
+ * ```
+ */
+export async function tryCatch<T>(
+  promise: Promise<T>,
+  mapError?: (error: unknown) => Error,
+): Promise<Result<T>> {
+  try {
+    return { ok: true, value: await promise };
+  } catch (error: unknown) {
+    const mapped = mapError
+      ? mapError(error)
+      : error instanceof Error
+        ? error
+        : new Error(String(error));
+    return { ok: false, error: mapped };
+  }
+}
+
+/**
+ * Maps the success value of a Result, leaving errors unchanged.
+ *
+ * @param result - The result to map
+ * @param fn - The mapping function for the success value
+ * @returns A new Result with the mapped value or the original error
+ *
+ * @example
+ * ```ts
+ * const parsed = tryCatchSync(() => JSON.parse(input));
+ * const name = mapResult(parsed, (data) => data.name);
+ * ```
+ */
+export function mapResult<T, U, E = Error>(
+  result: Result<T, E>,
+  fn: (value: T) => U,
+): Result<U, E> {
+  if (result.ok) {
+    return { ok: true, value: fn(result.value) };
+  }
+  return result;
+}
+
+/**
+ * Extracts the value from a Result, returning a default on error.
+ *
+ * @param result - The result to unwrap
+ * @param defaultValue - The fallback value if the result is an error
+ * @returns The success value or the default
+ *
+ * @example
+ * ```ts
+ * const config = unwrapOr(loadConfig(), defaultConfig);
+ * ```
+ */
+export function unwrapOr<T, E = Error>(
+  result: Result<T, E>,
+  defaultValue: T,
+): T {
+  return result.ok ? result.value : defaultValue;
+}
+
+/**
+ * Asserts that a value is unreachable. Used for exhaustive switch checks (Rule 8.3).
+ *
+ * @param x - The value that should be of type `never`
+ * @throws Always throws — this function is for compile-time exhaustiveness only
+ *
+ * @example
+ * ```ts
+ * switch (status) {
+ *   case 'active': return handleActive();
+ *   case 'inactive': return handleInactive();
+ *   default: assertUnreachable(status);
+ * }
+ * ```
+ */
+export function assertUnreachable(x: never): never {
+  throw new Error(`Exhaustive check failed: ${JSON.stringify(x)}`);
+}

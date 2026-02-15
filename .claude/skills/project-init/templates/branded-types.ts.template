@@ -1,0 +1,130 @@
+/**
+ * Branded (nominal) type utilities for domain primitives (Rule 7.3).
+ *
+ * Prevents accidental mixing of structurally identical types
+ * (e.g., using a UserId where an OrderId is expected).
+ *
+ * @example
+ * ```ts
+ * type UserId = Brand<string, 'UserId'>;
+ * type OrderId = Brand<string, 'OrderId'>;
+ *
+ * declare const userId: UserId;
+ * declare const orderId: OrderId;
+ *
+ * // Type error: UserId is not assignable to OrderId
+ * const wrong: OrderId = userId;
+ * ```
+ */
+
+declare const __brand: unique symbol;
+
+/**
+ * Creates a branded type from a base type and a unique brand string.
+ *
+ * @typeParam T - The base type (e.g., string, number)
+ * @typeParam TBrand - A unique string literal to distinguish this type
+ */
+export type Brand<T, TBrand extends string> = T & {
+  readonly [__brand]: TBrand;
+};
+
+/**
+ * Creates a branded string type.
+ *
+ * @typeParam TBrand - A unique string literal brand
+ *
+ * @example
+ * ```ts
+ * type Email = BrandedString<'Email'>;
+ * type Username = BrandedString<'Username'>;
+ * ```
+ */
+export type BrandedString<TBrand extends string> = Brand<string, TBrand>;
+
+/**
+ * Creates a branded number type.
+ *
+ * @typeParam TBrand - A unique string literal brand
+ *
+ * @example
+ * ```ts
+ * type Meters = BrandedNumber<'Meters'>;
+ * type Seconds = BrandedNumber<'Seconds'>;
+ * ```
+ */
+export type BrandedNumber<TBrand extends string> = Brand<number, TBrand>;
+
+// ---------------------------------------------------------------------------
+// Import Result type — adjust the path if your project structure differs.
+// If result.ts is not available, define Result inline or remove validation
+// helpers below.
+// ---------------------------------------------------------------------------
+import type { Result } from './result.js';
+
+/**
+ * Creates a factory function that validates and brands a string value.
+ *
+ * @param brandName - Display name for error messages
+ * @param validate - Validation predicate for the raw string
+ * @returns A factory function that returns Result<BrandedString<TBrand>>
+ *
+ * @example
+ * ```ts
+ * type Email = BrandedString<'Email'>;
+ * const createEmail = makeStringFactory<'Email'>(
+ *   'Email',
+ *   (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+ * );
+ *
+ * const result = createEmail('user@example.com');
+ * if (result.ok) {
+ *   sendEmail(result.value); // result.value is Email
+ * }
+ * ```
+ */
+export function makeStringFactory<TBrand extends string>(
+  brandName: string,
+  validate: (value: string) => boolean,
+): (value: string) => Result<BrandedString<TBrand>> {
+  return (value: string): Result<BrandedString<TBrand>> => {
+    if (!validate(value)) {
+      return {
+        ok: false,
+        error: new Error(`Invalid ${brandName}: ${value}`),
+      };
+    }
+    return { ok: true, value: value as BrandedString<TBrand> };
+  };
+}
+
+/**
+ * Creates a factory function that validates and brands a numeric value.
+ *
+ * @param brandName - Display name for error messages
+ * @param validate - Validation predicate for the raw number
+ * @returns A factory function that returns Result<BrandedNumber<TBrand>>
+ *
+ * @example
+ * ```ts
+ * type PositiveInt = BrandedNumber<'PositiveInt'>;
+ * const createPositiveInt = makeNumberFactory<'PositiveInt'>(
+ *   'PositiveInt',
+ *   (v) => Number.isInteger(v) && v > 0,
+ * );
+ * ```
+ */
+export function makeNumberFactory<TBrand extends string>(
+  brandName: string,
+  validate: (value: number) => boolean,
+): (value: number) => Result<BrandedNumber<TBrand>> {
+  return (value: number): Result<BrandedNumber<TBrand>> => {
+    if (!validate(value)) {
+      return {
+        ok: false,
+        error: new Error(`Invalid ${brandName}: ${value}`),
+      };
+    }
+    return { ok: true, value: value as BrandedNumber<TBrand> };
+  };
+}

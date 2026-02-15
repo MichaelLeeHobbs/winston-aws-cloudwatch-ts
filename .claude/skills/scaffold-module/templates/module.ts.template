@@ -1,0 +1,48 @@
+/**
+ * ${MODULE_DESCRIPTION}
+ *
+ * @module ${MODULE_NAME}
+ */
+
+import type { Result } from '../utils/result.js';
+import { assertUnreachable } from '../utils/result.js';
+import type { ${BRANDED_TYPE}, ${DOMAIN_TYPE} } from './schema.js';
+import { create${BRANDED_TYPE}, ${DOMAIN_TYPE}Schema } from './schema.js';
+
+/**
+ * Creates a new ${DOMAIN_TYPE} from validated input.
+ *
+ * @param input - The raw input to validate and transform
+ * @returns Result containing the validated ${DOMAIN_TYPE} or an error
+ * @throws Never throws; all errors returned in Result
+ *
+ * @example
+ * ```ts
+ * const result = create${DOMAIN_TYPE}({ /* ... *\/ });
+ * if (result.ok) {
+ *   console.log(result.value);
+ * }
+ * ```
+ */
+export function create${DOMAIN_TYPE}(
+  input: unknown,
+): Result<${DOMAIN_TYPE}> {
+  const parsed = ${DOMAIN_TYPE}Schema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: new Error(
+        `Invalid ${DOMAIN_TYPE}: ${parsed.error.message}`,
+      ),
+    };
+  }
+  return { ok: true, value: parsed.data };
+}
+
+// Add more module functions below following these rules:
+// - Return Result<T> for any operation that can fail (Rule 6.2)
+// - Max 40 lines per function (Rule 8.4)
+// - Max 4 parameters — use an options object for more (Rule 8.4)
+// - Use readonly for all data (Rule 7.1)
+// - Exhaustive switch with assertUnreachable for unions (Rule 8.3)
+// - TSDoc on all public functions (Rule 10.1)
