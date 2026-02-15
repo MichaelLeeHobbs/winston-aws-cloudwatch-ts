@@ -145,8 +145,8 @@ transport.close()
 
 Coming from another CloudWatch Winston transport? See our migration guides:
 
-- [Migrating from `winston-cloudwatch`](docs/migration-from-winston-cloudwatch.md) (lazywithclass)
-- [Migrating from `winston-aws-cloudwatch`](docs/migration-from-winston-aws-cloudwatch.md) (timdp/pascencio)
+- [Migrating from `winston-cloudwatch`](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/docs/migration-from-winston-cloudwatch.md) (lazywithclass)
+- [Migrating from `winston-aws-cloudwatch`](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/docs/migration-from-winston-aws-cloudwatch.md) (timdp/pascencio)
 
 ## Error Handling
 
