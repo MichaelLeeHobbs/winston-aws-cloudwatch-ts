@@ -2,34 +2,40 @@ import createDebug from 'debug'
 
 const debug = createDebug('winston-aws-cloudwatch:Queue')
 
+/** Simple bounded FIFO queue. When full, the oldest item is dropped on push. */
 export default class Queue<T> {
-  private readonly _contents: T[] = []
-  private readonly _maxSize: number
+  private readonly contents: T[] = []
+  private readonly maxSize: number
 
+  /** @param maxSize Maximum number of items. Values ≤ 0 disable the limit. */
   constructor(maxSize = 0) {
-    this._maxSize = maxSize
+    this.maxSize = maxSize
   }
 
+  /** Current number of items in the queue. */
   get size(): number {
-    return this._contents.length
+    return this.contents.length
   }
 
+  /** Adds an item. Returns the dropped item if the queue was full, otherwise `undefined`. */
   push(item: T): T | undefined {
-    debug('push', { item })
-    this._contents.push(item)
-    if (this._maxSize > 0 && this._contents.length > this._maxSize) {
-      return this._contents.shift()
+    debug('push', { size: this.contents.length + 1 })
+    this.contents.push(item)
+    if (this.maxSize > 0 && this.contents.length > this.maxSize) {
+      return this.contents.shift()
     }
     return undefined
   }
 
+  /** Returns the first `num` items without removing them. */
   head(num: number): T[] {
     debug('head', { num })
-    return this._contents.slice(0, num)
+    return this.contents.slice(0, num)
   }
 
+  /** Removes the first `num` items from the queue. */
   remove(num: number): void {
     debug('remove', { num })
-    this._contents.splice(0, num)
+    this.contents.splice(0, num)
   }
 }

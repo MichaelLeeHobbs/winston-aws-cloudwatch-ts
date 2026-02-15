@@ -2,219 +2,179 @@ import createDebug from 'debug'
 import CloudWatchEventFormatter, {
   type CloudWatchEventFormatterOptions,
 } from './CloudWatchEventFormatter'
-import type LogItem from './LogItem'
+import { type LogItem } from './LogItem'
 
+import { isError } from './typeGuards'
 import {
   CloudWatchLogsClient,
   type CloudWatchLogsClientConfig,
   CreateLogGroupCommand,
   CreateLogStreamCommand,
-  DescribeLogStreamsCommand,
-  type DescribeLogStreamsCommandOutput,
-  type LogStream,
   PutLogEventsCommand,
 } from '@aws-sdk/client-cloudwatch-logs'
 
 const debug = createDebug('winston-aws-cloudwatch:CloudWatchClient')
 
+/** Options for configuring {@link CloudWatchClient}. */
 export interface CloudWatchClientOptions extends CloudWatchEventFormatterOptions {
-  awsConfig?: CloudWatchLogsClientConfig
-  createLogGroup?: boolean
-  createLogStream?: boolean
-  submissionRetryCount?: number
-  timeout?: number
+  /** AWS SDK client configuration (credentials, region, endpoint, etc.). */
+  readonly awsConfig?: CloudWatchLogsClientConfig
+  /** Auto-create the log group on first submission if it doesn't exist. Default: `false`. */
+  readonly createLogGroup?: boolean
+  /** Auto-create the log stream on first submission if it doesn't exist. Default: `false`. */
+  readonly createLogStream?: boolean
+  /** Timeout in milliseconds for each AWS SDK call. Default: `10000`. */
+  readonly timeout?: number
 }
 
 const DEFAULT_OPTIONS = {
   createLogGroup: false,
   createLogStream: false,
-  submissionRetryCount: 1,
   timeout: 10_000,
 } as const satisfies Partial<CloudWatchClientOptions>
 
-interface AwsError extends Error {
-  code?: string
-}
-
-function isAwsError(err: unknown): err is AwsError {
-  return err instanceof Error
-}
-
 interface ResolvedOptions {
-  createLogGroup: boolean
-  createLogStream: boolean
-  submissionRetryCount: number
-  timeout: number
+  readonly createLogGroup: boolean
+  readonly createLogStream: boolean
+  readonly timeout: number
 }
 
+function validateConfig(
+  logGroupName: string,
+  logStreamName: string,
+  options: ResolvedOptions
+): void {
+  const errors: string[] = []
+  if (!logGroupName || logGroupName.length > 512) {
+    errors.push('logGroupName must be between 1 and 512 characters')
+  }
+  if (!logStreamName || logStreamName.length > 512) {
+    errors.push('logStreamName must be between 1 and 512 characters')
+  }
+  if (!Number.isFinite(options.timeout) || options.timeout <= 0) {
+    errors.push('timeout must be a finite number greater than 0')
+  }
+  if (errors.length > 0) {
+    throw new Error(`Invalid CloudWatchClient configuration:\n- ${errors.join('\n- ')}`)
+  }
+}
+
+// AWS SDK client configuration is mutable by design, but we only read from it so we accept a mutable type for convenience
+// eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
+function resolveOptions(options?: Partial<CloudWatchClientOptions>): ResolvedOptions {
+  return {
+    createLogGroup: options?.createLogGroup ?? DEFAULT_OPTIONS.createLogGroup,
+    createLogStream: options?.createLogStream ?? DEFAULT_OPTIONS.createLogStream,
+    timeout: options?.timeout ?? DEFAULT_OPTIONS.timeout,
+  }
+}
+
+/**
+ * Manages communication with the AWS CloudWatch Logs API.
+ *
+ * Handles optional auto-creation of log groups/streams and submitting
+ * log events via `PutLogEvents`. Implements {@link RelayClient} for use
+ * with {@link Relay}.
+ */
 export default class CloudWatchClient {
-  private readonly _logGroupName: string
-  private readonly _logStreamName: string
-  private readonly _options: ResolvedOptions
-  private readonly _formatter: CloudWatchEventFormatter
-  private _sequenceToken: string | null | undefined
-  private readonly _client: CloudWatchLogsClient
-  private _initializing: Promise<void> | null
+  private readonly logGroupName: string
+  private readonly logStreamName: string
+  private readonly options: ResolvedOptions
+  private readonly formatter: CloudWatchEventFormatter
+  private readonly client: CloudWatchLogsClient
+  private initializing: Promise<void> | null
 
   constructor(
     logGroupName: string,
     logStreamName: string,
+    // eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
     options?: Partial<CloudWatchClientOptions>
   ) {
-    debug('constructor', { logGroupName, logStreamName, options })
-    this._logGroupName = logGroupName
-    this._logStreamName = logStreamName
-
-    this._options = {
-      createLogGroup: options?.createLogGroup ?? DEFAULT_OPTIONS.createLogGroup,
-      createLogStream: options?.createLogStream ?? DEFAULT_OPTIONS.createLogStream,
-      submissionRetryCount: options?.submissionRetryCount ?? DEFAULT_OPTIONS.submissionRetryCount,
-      timeout: options?.timeout ?? DEFAULT_OPTIONS.timeout,
-    }
-
-    this._formatter = new CloudWatchEventFormatter(options)
-    this._sequenceToken = null
-    this._client = options?.awsConfig
-      ? new CloudWatchLogsClient(options.awsConfig)
+    debug('constructor', { logGroupName, logStreamName })
+    this.options = resolveOptions(options)
+    validateConfig(logGroupName, logStreamName, this.options)
+    this.logGroupName = logGroupName
+    this.logStreamName = logStreamName
+    this.formatter = new CloudWatchEventFormatter(options)
+    this.client = options?.awsConfig
+      ? /* istanbul ignore next */ new CloudWatchLogsClient(options.awsConfig)
       : new CloudWatchLogsClient()
-    this._initializing = null
+    this.initializing = null
   }
 
+  /** Destroys the underlying AWS SDK client, releasing its resources. */
+  /* istanbul ignore next */
   destroy(): void {
-    this._client.destroy()
+    this.client.destroy()
   }
 
-  private get _abortSignal(): AbortSignal {
-    return AbortSignal.timeout(this._options.timeout)
+  private get abortSignal(): AbortSignal {
+    return AbortSignal.timeout(this.options.timeout)
   }
 
-  async submit(batch: LogItem[]): Promise<void> {
-    debug('submit', { batch })
-    await this._initialize()
-    return await this._doSubmit(batch)
+  /** Submits a batch of log items to CloudWatch Logs via `PutLogEvents`. */
+  async submit(batch: readonly LogItem[]): Promise<void> {
+    debug('submit', { batchSize: batch.length })
+    await this.initialize()
+    await this.putLogEvents(batch)
   }
 
-  private _initialize(): Promise<void> {
-    this._initializing ??= this._maybeCreateLogGroup()
-      .then(() => this._maybeCreateLogStream())
+  // Lazy, idempotent initialization. The ??= operator ensures that concurrent
+  // submit() calls share a single in-flight promise rather than racing to create
+  // duplicate log groups/streams. On success the resolved promise is cached so
+  // subsequent submits skip initialization entirely. On failure the cached
+  // promise is cleared so the next submit() retries from scratch instead of
+  // permanently replaying the rejected promise.
+  private initialize(): Promise<void> {
+    this.initializing ??= this.maybeCreateLogGroup()
+      .then(() => this.maybeCreateLogStream())
       .catch((err: unknown) => {
-        // Reset so the next call retries instead of replaying the cached rejection
-        this._initializing = null
+        this.initializing = null
         throw err
       })
-    return this._initializing
+    return this.initializing
   }
 
-  private async _maybeCreateLogGroup(): Promise<void> {
-    if (!this._options.createLogGroup) {
+  private async maybeCreateLogGroup(): Promise<void> {
+    if (!this.options.createLogGroup) {
       return
     }
-    const params = { logGroupName: this._logGroupName }
+    const params = { logGroupName: this.logGroupName }
     try {
-      await this._client.send(new CreateLogGroupCommand(params), { abortSignal: this._abortSignal })
+      await this.client.send(new CreateLogGroupCommand(params), { abortSignal: this.abortSignal })
     } catch (err) {
-      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+      if (!isError(err) || err.name !== 'ResourceAlreadyExistsException') {
         throw err
       }
     }
   }
 
-  private async _maybeCreateLogStream(): Promise<void> {
-    if (!this._options.createLogStream) {
+  private async maybeCreateLogStream(): Promise<void> {
+    if (!this.options.createLogStream) {
       return
     }
     const params = {
-      logGroupName: this._logGroupName,
-      logStreamName: this._logStreamName,
+      logGroupName: this.logGroupName,
+      logStreamName: this.logStreamName,
     }
     try {
-      await this._client.send(new CreateLogStreamCommand(params), {
-        abortSignal: this._abortSignal,
+      await this.client.send(new CreateLogStreamCommand(params), {
+        abortSignal: this.abortSignal,
       })
     } catch (err) {
-      if (!isAwsError(err) || err.code !== 'ResourceAlreadyExistsException') {
+      if (!isError(err) || err.name !== 'ResourceAlreadyExistsException') {
         throw err
       }
     }
   }
 
-  private async _doSubmit(batch: LogItem[]): Promise<void> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await this._maybeUpdateSequenceToken()
-        await this._putLogEventsAndStoreSequenceToken(batch)
-        return
-      } catch (err) {
-        if (!isAwsError(err) || err.code !== 'InvalidSequenceTokenException') {
-          throw err
-        }
-        if (attempt >= this._options.submissionRetryCount) {
-          const error = new Error(
-            'InvalidSequenceTokenException: retry limit exceeded'
-          ) as AwsError & { code: string }
-          error.code = 'InvalidSequenceTokenException'
-          throw error
-        }
-        this._sequenceToken = null
-      }
-    }
-  }
-
-  private async _maybeUpdateSequenceToken(): Promise<void> {
-    // null = unknown (needs fetch); undefined = known empty (new stream)
-    if (this._sequenceToken !== null) {
-      return Promise.resolve()
-    }
-    await this._fetchAndStoreSequenceToken()
-    return undefined
-  }
-
-  private async _putLogEventsAndStoreSequenceToken(batch: LogItem[]): Promise<void> {
-    const { nextSequenceToken } = await this._putLogEvents(batch)
-    this._storeSequenceToken(nextSequenceToken)
-  }
-
-  private _putLogEvents(batch: LogItem[]) {
-    const sequenceToken = this._sequenceToken === null ? undefined : this._sequenceToken
-    debug('putLogEvents', { batch, sequenceToken })
+  private async putLogEvents(batch: readonly LogItem[]): Promise<void> {
+    debug('putLogEvents', { batchSize: batch.length })
     const params = {
-      logGroupName: this._logGroupName,
-      logStreamName: this._logStreamName,
-      logEvents: batch.map(item => this._formatter.formatLogItem(item)),
-      sequenceToken,
+      logGroupName: this.logGroupName,
+      logStreamName: this.logStreamName,
+      logEvents: batch.map(item => this.formatter.formatLogItem(item)),
     }
-    return this._client.send(new PutLogEventsCommand(params), { abortSignal: this._abortSignal })
-  }
-
-  private async _fetchAndStoreSequenceToken(): Promise<string | undefined> {
-    debug('fetchSequenceToken')
-    const { uploadSequenceToken } = await this._findLogStream()
-    return this._storeSequenceToken(uploadSequenceToken)
-  }
-
-  private _storeSequenceToken(sequenceToken: string | undefined): string | undefined {
-    debug('storeSequenceToken', { sequenceToken })
-    this._sequenceToken = sequenceToken
-    return sequenceToken
-  }
-
-  private async _findLogStream(): Promise<LogStream> {
-    let nextToken: DescribeLogStreamsCommandOutput['nextToken']
-    do {
-      debug('findLogStream', { nextToken })
-      const res = await this._client.send(
-        new DescribeLogStreamsCommand({
-          logGroupName: this._logGroupName,
-          logStreamNamePrefix: this._logStreamName,
-          nextToken,
-        }),
-        { abortSignal: this._abortSignal }
-      )
-      const { logStreams = [] } = res
-      const match = logStreams.find(ls => ls.logStreamName === this._logStreamName)
-      if (match) return match
-      nextToken = res.nextToken
-    } while (nextToken != null)
-    throw new Error('Log stream not found')
+    await this.client.send(new PutLogEventsCommand(params), { abortSignal: this.abortSignal })
   }
 }

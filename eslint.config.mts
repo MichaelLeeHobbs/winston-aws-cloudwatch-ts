@@ -44,7 +44,7 @@ export default tseslint.config(
     files: ['**/*.{ts,mts,cts}'],
     rules: {
       '@typescript-eslint/no-unused-vars': [
-        'warn',
+        'error',
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
@@ -59,6 +59,14 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unnecessary-condition': 'warn',
+      '@typescript-eslint/explicit-function-return-type': 'error',
+      '@typescript-eslint/prefer-readonly-parameter-types': [
+        'warn',
+        { treatMethodsAsReadonly: true },
+      ],
+      'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'max-lines-per-function': ['warn', { max: 40, skipBlankLines: true, skipComments: true }],
+      complexity: ['error', 10],
     },
   },
 
@@ -73,6 +81,9 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-return': 'off',
       '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/no-empty-function': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/prefer-readonly-parameter-types': 'off',
+      'max-lines-per-function': 'off',
     },
   },
 

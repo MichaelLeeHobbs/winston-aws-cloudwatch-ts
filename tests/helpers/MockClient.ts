@@ -8,14 +8,14 @@ export class MockClient<T extends RelayItem> implements RelayClient<T> {
     this._failures = [...failures]
   }
 
-  async submit(batch: T[]): Promise<void> {
+  async submit(batch: readonly T[]): Promise<void> {
     if (this._failures.length === 0) {
       this._submitted = this._submitted.concat(batch)
       return Promise.resolve()
     } else {
       const code = this._failures.shift()!
-      const error = new Error(code) as Error & { code: string }
-      error.code = code
+      const error = new Error(code)
+      error.name = code
       return Promise.reject(error)
     }
   }

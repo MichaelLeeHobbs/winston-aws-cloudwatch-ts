@@ -14,7 +14,7 @@ A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport f
 - ✅ **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
 - ✅ **Automatic Retries** - Handles sequence token errors automatically
 - ✅ **Customizable Formatting** - Flexible log formatting options
-- ✅ **Well Tested** - 94%+ test coverage with Jest
+- ✅ **Well Tested** - 100% test coverage with Jest
 
 ## Installation
 
@@ -42,7 +42,6 @@ const logger = winston.createLogger({
       createLogGroup: true,
       createLogStream: true,
       submissionInterval: 2000,
-      submissionRetryCount: 1,
       batchSize: 20,
       awsConfig: {
         region: 'us-east-1',
@@ -83,23 +82,23 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 
 ## Configuration Options
 
-| Option | Type | Required | Default | Description |
-|--------|------|----------|---------|-------------|
-| `logGroupName` | `string` | ✅ Yes | - | CloudWatch log group name |
-| `logStreamName` | `string` | ✅ Yes | - | CloudWatch log stream name |
-| `awsConfig` | `CloudWatchLogsClientConfig` | No | `{}` | AWS SDK v3 client configuration |
-| `createLogGroup` | `boolean` | No | `false` | Automatically create log group if it doesn't exist |
-| `createLogStream` | `boolean` | No | `false` | Automatically create log stream if it doesn't exist |
-| `submissionInterval` | `number` | No | `2000` | Milliseconds between log submissions |
-| `batchSize` | `number` | No | `20` | Maximum number of logs to send in one batch |
-| `submissionRetryCount` | `number` | No | `1` | Number of retries for failed submissions |
-| `timeout` | `number` | No | `10000` | Timeout in ms for each AWS SDK call |
-| `maxQueueSize` | `number` | No | `10000` | Maximum queued log items (0 = unlimited, oldest dropped when full) |
-| `formatLog` | `function` | No | - | Custom function to format log messages |
-| `formatLogItem` | `function` | No | - | Custom function to format log items |
-| `level` | `string` | No | - | Minimum log level for this transport (inherited from Winston) |
-| `silent` | `boolean` | No | `false` | Suppress all output (inherited from Winston) |
-| `handleExceptions` | `boolean` | No | `false` | Handle uncaught exceptions (inherited from Winston) |
+| Option               | Type                         | Required | Default     | Description                                                                                      |
+|----------------------|------------------------------|----------|-------------|--------------------------------------------------------------------------------------------------|
+| `logGroupName`       | `string`                     | ✅ Yes   | -           | CloudWatch log group name (1-512 characters)                                                     |
+| `logStreamName`      | `string`                     | ✅ Yes   | -           | CloudWatch log stream name (1-512 characters)                                                    |
+| `awsConfig`          | `CloudWatchLogsClientConfig` | No       | `{}`        | AWS SDK v3 client configuration                                                                  |
+| `createLogGroup`     | `boolean`                    | No       | `false`     | Automatically create log group if it doesn't exist                                               |
+| `createLogStream`    | `boolean`                    | No       | `false`     | Automatically create log stream if it doesn't exist                                              |
+| `timeout`            | `number`                     | No       | `10000`     | Timeout in ms for each AWS SDK call                                                              |
+| `maxEventSize`       | `number`                     | No       | `1048576`   | Max event size in bytes (including 26-byte overhead). Messages exceeding the limit are truncated  |
+| `formatLog`          | `function`                   | No       | -           | Custom function to format log messages. Takes precedence over `formatLogItem`                    |
+| `formatLogItem`      | `function`                   | No       | -           | Custom function to format log items (message + timestamp). Ignored if `formatLog` is provided    |
+| `submissionInterval` | `number`                     | No       | `2000`      | Milliseconds between batch submissions                                                           |
+| `batchSize`          | `number`                     | No       | `20`        | Maximum number of logs per batch                                                                 |
+| `maxQueueSize`       | `number`                     | No       | `10000`     | Maximum queued log items (oldest dropped when full)                                              |
+| `level`              | `string`                     | No       | -           | Minimum log level for this transport (inherited from Winston)                                    |
+| `silent`             | `boolean`                    | No       | `false`     | Suppress all output (inherited from Winston)                                                     |
+| `handleExceptions`   | `boolean`                    | No       | `false`     | Handle uncaught exceptions (inherited from Winston)                                              |
 
 ### Custom Formatting
 

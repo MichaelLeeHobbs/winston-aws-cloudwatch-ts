@@ -29,7 +29,7 @@ jest.mock('../../src/CloudWatchClient', () => {
   return {
     __esModule: true,
     default: jest.fn().mockImplementation(() => ({
-      submit: jest.fn().mockResolvedValue(undefined),
+      submit: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
       destroy: jest.fn(),
     })),
   }
@@ -68,7 +68,7 @@ describe('CloudWatchTransport', () => {
     transport.log({ level: 'info', message: 'hello', extra: 'data' }, callback)
     expect(mockSubmit).toHaveBeenCalledTimes(1)
 
-    const submittedItem = mockSubmit.mock.calls[0][0]
+    const submittedItem = mockSubmit.mock.calls[0]![0] as Record<string, unknown>
     expect(submittedItem.level).toBe('info')
     expect(submittedItem.message).toBe('hello')
     expect(submittedItem.meta).toEqual({ extra: 'data' })
@@ -82,7 +82,7 @@ describe('CloudWatchTransport', () => {
     })
     const callback = jest.fn()
     transport.log({ level: 42, message: undefined } as unknown as Record<string, unknown>, callback)
-    const submittedItem = mockSubmit.mock.calls[0][0]
+    const submittedItem = mockSubmit.mock.calls[0]![0] as Record<string, unknown>
     expect(submittedItem.level).toBe('')
     expect(submittedItem.message).toBe('')
   })
@@ -105,7 +105,7 @@ describe('CloudWatchTransport', () => {
     transport.on('error', errorSpy)
 
     // Trigger error on the relay (which is an EventEmitter)
-    const relay = (transport as any)._relay
+    const relay = (transport as any).relay
     const testError = new Error('test error')
     relay.emit('error', testError)
 

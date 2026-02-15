@@ -1,53 +1,69 @@
 import createDebug from 'debug'
+import { isError } from './typeGuards'
 import Bottleneck from 'bottleneck'
 import Queue from './Queue'
 import { EventEmitter } from 'events'
+import { type LogCallback } from './LogItem'
 
 const debug = createDebug('winston-aws-cloudwatch:Relay')
 
+/** Configuration for {@link Relay} batching and throttling behavior. */
 export interface RelayOptions {
-  submissionInterval: number
-  batchSize: number
-  maxQueueSize: number
+  /** Minimum interval in milliseconds between batch submissions. Default: 2000. */
+  readonly submissionInterval: number
+  /** Maximum number of items per batch. Default: 20. */
+  readonly batchSize: number
+  /** Maximum queue size. When full, the oldest item is dropped. Default: 10000. */
+  readonly maxQueueSize: number
 }
 
 export const DEFAULT_OPTIONS: RelayOptions = {
   submissionInterval: 2000,
   batchSize: 20,
   maxQueueSize: 10_000,
-}
+} as const satisfies RelayOptions
 
-export type LogCallback = (err: unknown, ok?: boolean) => void
-
-// Minimal shape Relay expects from queued items.
+/** Minimal shape Relay expects from queued items. */
 export interface RelayItem {
-  callback: LogCallback
+  /** Callback invoked when the item is submitted or an error occurs. */
+  readonly callback: LogCallback
 }
 
-// Minimal shape of the client Relay talks to.
+/** Client interface that Relay delegates batch submission to. */
 export interface RelayClient<T extends RelayItem> {
-  submit(batch: T[]): Promise<void>
+  /** Submits a batch of items to the underlying service. */
+  submit(batch: readonly T[]): Promise<void>
+  /** Optional cleanup when the relay is stopped. */
   destroy?(): void
 }
 
+/**
+ * Generic batching and throttling layer.
+ *
+ * Buffers items in a {@link Queue}, drains them in batches via a {@link RelayClient},
+ * and rate-limits submissions using Bottleneck. Emits `'error'` events on
+ * unrecoverable submission failures.
+ */
 export default class Relay<T extends RelayItem> extends EventEmitter {
   private readonly client: RelayClient<T>
   private readonly options: RelayOptions
   private limiter: Bottleneck | null
   private queue: Queue<T> | null
+  private submissionPending = false
 
   constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
     super()
-    debug('constructor', { client, options })
+    debug('constructor', { options })
     this.client = client
     this.options = { ...DEFAULT_OPTIONS, ...(options ?? {}) }
     this.limiter = null
     this.queue = null
   }
 
+  /** Initializes the rate limiter and queue. No-op if already started. */
   start(): void {
     debug('start')
-    if (this.queue) throw new Error('Already started')
+    if (this.queue) return
     this.limiter = new Bottleneck({
       maxConcurrent: 1,
       minTime: this.options.submissionInterval,
@@ -55,71 +71,105 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     this.queue = new Queue<T>(this.options.maxQueueSize)
   }
 
+  /** Stops the relay, notifies pending item callbacks, and destroys the client. */
   stop(): void {
+    const pendingItems = this.queue ? this.queue.head(this.queue.size) : []
     this.queue = null
+    this.submissionPending = false
     void this.limiter?.stop({ dropWaitingJobs: true })
     this.limiter = null
     this.client.destroy?.()
+
+    // Notify Winston that each unsent item failed due to transport shutdown.
+    const err = new Error('Transport closed')
+    for (const item of pendingItems) {
+      item.callback(err)
+    }
   }
 
+  /** Enqueues an item for batch submission. Auto-starts the relay if not started. */
   submit(item: T): void {
     if (!this.queue) this.start()
     const dropped = this.queue!.push(item)
     if (dropped) {
+      // Queue is full — the oldest item was evicted. Notify Winston it was lost.
       dropped.callback(new Error('Queue overflow: log item dropped'))
     }
     this.scheduleSubmission()
   }
 
+  // Schedules a single Bottleneck job to drain the queue. The guard flag
+  // prevents redundant jobs: only one drain job is active at a time.
+  // After processing a batch, submitInternal() calls this again to continue
+  // draining — an event-loop-mediated iteration bounded by the queue's maxSize.
   private scheduleSubmission(): void {
+    if (this.submissionPending || !this.limiter || !this.queue) return
+    this.submissionPending = true
     debug('scheduleSubmission')
-    this.limiter!.schedule(() => this.submitInternal())
-      // Silently discard rejections after stop() (Bottleneck drops queued jobs).
-      // Otherwise surface via error event to keep parity with original behavior.
+    void this.limiter
+      .schedule(() => this.submitInternal())
       .catch(err => {
+        this.submissionPending = false
+        // Defensive: Bottleneck rejects scheduled jobs when stop({ dropWaitingJobs })
+        // is called. By that point this.queue is already null, so the error is swallowed.
+        /* istanbul ignore next */
         if (this.queue) this.emit('error', err)
       })
   }
 
-  private submitInternal(): Promise<void> {
+  // Runs inside a Bottleneck job. Sends one batch to the client, handles the
+  // result, then re-schedules to drain any remaining items.
+  private async submitInternal(): Promise<void> {
+    this.submissionPending = false
+    // Defensive guard: queue may be null (stop() called while job was scheduled)
+    // or empty (drained by a prior batch before this job fires).
+    /* istanbul ignore next */
     if (!this.queue || this.queue.size === 0) {
       debug('submit: queue empty')
-      return Promise.resolve()
+      return
     }
 
     const batch = this.queue.head(this.options.batchSize)
     debug(`submit: submitting ${batch.length} item(s)`)
 
-    return this.client
-      .submit(batch)
-      .then(
-        () => this.onSubmitted(batch),
-        (err: RelayError) => this.onError(err, batch)
-      )
-      .then(() => this.scheduleSubmission())
+    try {
+      await this.client.submit(batch)
+      this.onSubmitted(batch)
+    } catch (err) {
+      this.onError(err, batch)
+    }
+
+    // Continue draining if items remain in the queue.
+    this.scheduleSubmission()
   }
 
-  private onSubmitted(batch: T[]): void {
-    debug('onSubmitted', { batch })
-    this.queue!.remove(batch.length)
+  private onSubmitted(batch: readonly T[]): void {
+    debug('onSubmitted', { batchSize: batch.length })
+    if (!this.queue) return
+    this.queue.remove(batch.length)
+    // Notify Winston that each item was successfully delivered.
     for (const item of batch) {
       item.callback(null, true)
     }
   }
 
-  private onError(err: RelayError, batch: T[]): void {
+  // Handles a failed client.submit(). Some AWS errors are recoverable:
+  // the batch is either silently dropped or left in the queue for retry.
+  // Anything else is surfaced as an 'error' event on the Relay.
+  private onError(err: unknown, batch: readonly T[]): void {
     debug('onError', { error: err })
-    if (err.code === 'DataAlreadyAcceptedException') {
-      // Assume the request got replayed and remove the batch
-      this.queue!.remove(batch.length)
-    } else if (err.code === 'InvalidSequenceTokenException') {
-      // Keep retrying: do nothing; the next scheduled submission will retry
+    if (!this.queue) return
+    /* istanbul ignore next -- defensive: non-Error throws are not expected */
+    const name = isError(err) ? err.name : ''
+    if (name === 'DataAlreadyAcceptedException') {
+      // AWS already accepted these events (duplicate request) — safe to discard.
+      this.queue.remove(batch.length)
+    } else if (name === 'InvalidSequenceTokenException') {
+      // Sequence token is stale — leave the batch in the queue so the next
+      // scheduled submission retries it automatically.
     } else {
+      // Unrecoverable error — surface to the transport's error listeners.
       this.emit('error', err)
     }
   }
-}
-
-interface RelayError extends Error {
-  code?: string
 }

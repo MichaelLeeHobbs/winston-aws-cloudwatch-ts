@@ -33,7 +33,7 @@ Data flows through a pipeline: **Winston Logger → CloudWatchTransport → Rela
 - **CloudWatchClient** (`src/CloudWatchClient.ts`) — Implements `RelayClient<LogItem>`. Manages the AWS SDK client, sequence token tracking, and optional auto-creation of log groups/streams.
 - **CloudWatchEventFormatter** (`src/CloudWatchEventFormatter.ts`) — Converts `LogItem` to CloudWatch `InputLogEvent`. Default format: `[LEVEL] message {metadata}`. Customizable via formatter options.
 - **Queue\<T\>** (`src/Queue.ts`) — Simple FIFO queue (array-backed) with `push`, `head(n)`, `remove(n)`, `size`.
-- **LogItem** (`src/LogItem.ts`) — Immutable value object holding `date`, `level`, `message`, `meta`, `callback`.
+- **LogItem** (`src/LogItem.ts`) — Readonly interface representing a log entry: `date`, `level`, `message`, `meta`, `callback`.
 - **Barrel** (`src/index.ts`) — Re-exports all public modules. Default export is `CloudWatchTransport`.
 
 ## Code Conventions
@@ -42,6 +42,7 @@ Data flows through a pipeline: **Winston Logger → CloudWatchTransport → Rela
 - **TypeScript strict mode** with `@typescript-eslint/no-explicit-any` as error
 - No semicolons, single quotes, 100-char line width, ES5 trailing commas (Prettier)
 - Unused parameters prefixed with `_`
+- Private fields/methods use `_` prefix **only** when a public getter shares the same name (e.g. `private readonly _date` + `get date()`); otherwise no prefix
 - Consistent inline type imports (`import { type Foo } from ...`)
 - Generics for flexibility (`Relay<T>`, `RelayClient<T>`, `Queue<T>`)
 
