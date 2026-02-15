@@ -7,6 +7,9 @@ import { type LogCallback } from './LogItem'
 
 const debug = createDebug('winston-aws-cloudwatch:Relay')
 
+/** Default timeout in milliseconds for {@link Relay.flush}. */
+export const DEFAULT_FLUSH_TIMEOUT = 10_000
+
 /** Configuration for {@link Relay} batching and throttling behavior. */
 export interface RelayOptions {
   /** Minimum interval in milliseconds between batch submissions. Default: 2000. */
@@ -50,6 +53,8 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   private limiter: Bottleneck | null
   private queue: Queue<T> | null
   private submissionPending = false
+  private flushWaiters = new Set<() => void>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
     super()
@@ -73,6 +78,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
 
   /** Stops the relay, notifies pending item callbacks, and destroys the client. */
   stop(): void {
+    this.resolveFlush()
     const pendingItems = this.queue ? this.queue.head(this.queue.size) : []
     this.queue = null
     this.submissionPending = false
@@ -96,6 +102,41 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
       dropped.callback(new Error('Queue overflow: log item dropped'))
     }
     this.scheduleSubmission()
+  }
+
+  /**
+   * Returns a promise that resolves when the queue has been fully drained,
+   * or when the timeout expires — whichever comes first.
+   */
+  flush(timeout = DEFAULT_FLUSH_TIMEOUT): Promise<void> {
+    if (!this.queue || this.queue.size === 0) {
+      return Promise.resolve()
+    }
+    this.scheduleSubmission()
+    return new Promise<void>(resolve => {
+      this.flushWaiters.add(resolve)
+      // Only create one shared timer for the flush cycle
+      if (!this.flushTimer) {
+        this.flushTimer = globalThis.setTimeout(() => {
+          this.resolveFlush()
+        }, timeout)
+        this.flushTimer.unref()
+      }
+    })
+  }
+
+  private resolveFlush(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.flushWaiters.size > 0) {
+      const waiters = [...this.flushWaiters]
+      this.flushWaiters.clear()
+      for (const resolve of waiters) {
+        resolve()
+      }
+    }
   }
 
   // Schedules a single Bottleneck job to drain the queue. The guard flag
@@ -139,8 +180,13 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
       this.onError(err, batch)
     }
 
-    // Continue draining if items remain in the queue.
-    this.scheduleSubmission()
+    // Continue draining if items remain, otherwise resolve any pending flush.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- queue may become null if stop() is called during the await
+    if (this.queue && this.queue.size > 0) {
+      this.scheduleSubmission()
+    } else {
+      this.resolveFlush()
+    }
   }
 
   private onSubmitted(batch: readonly T[]): void {
