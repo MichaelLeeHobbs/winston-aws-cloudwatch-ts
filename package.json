@@ -1,5 +1,5 @@
 {
-  "name": "winston-aws-cloudwatch-ts",
+  "name": "@ubercode/winston-cloudwatch",
   "version": "1.0.0",
   "description": "A TypeScript Winston transport for Amazon CloudWatch.",
   "keywords": [
@@ -67,7 +67,6 @@
   },
   "files": [
     "dist/",
-    "src/",
     "README.md",
     "LICENSE"
   ],
@@ -76,6 +75,12 @@
     "build": "tsup",
     "build:watch": "tsup --watch",
     "prepublishOnly": "pnpm run test && pnpm run build",
+    "preversion": "pnpm run test && pnpm run build",
+    "postversion": "git push && git push --tags",
+    "version:major": "npm version major",
+    "version:minor": "npm version minor",
+    "version:patch": "npm version patch",
+    "dry-run": "npm pack --dry-run",
     "test": "pnpm run test:format && pnpm run test:lint && pnpm run test:unit",
     "test:format": "prettier --check \"{src,tests}/**/*.{ts,js,json,md}\" \"*.{mts,ts,json}\" \".github/**/*.yml\"",
     "test:lint": "eslint",
@@ -87,9 +92,12 @@
     "lint": "eslint --fix",
     "precommit": "lint-staged"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts.git"
+    "url": "git+https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts.git"
   },
   "homepage": "https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts#readme",
   "bugs": {

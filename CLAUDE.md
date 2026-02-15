@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Winston transport for AWS CloudWatch Logs, written in TypeScript. Uses AWS SDK v3, Bottleneck for rate limiting, and publishes as dual ESM/CJS with type declarations via tsup. Package: `winston-aws-cloudwatch-ts`, requires Node.js >= 20.9.0.
+Winston transport for AWS CloudWatch Logs, written in TypeScript. Uses AWS SDK v3, Bottleneck for rate limiting, and publishes as dual ESM/CJS with type declarations via tsup. Package: `@ubercode/winston-cloudwatch`, requires Node.js >= 20.9.0.
 
 ## Commands
 
