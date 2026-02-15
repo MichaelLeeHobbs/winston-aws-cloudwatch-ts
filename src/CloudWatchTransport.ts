@@ -1,7 +1,10 @@
 import type { TransportStreamOptions } from 'winston-transport'
 import Transport from 'winston-transport'
-import CloudWatchClient from './CloudWatchClient'
-import type { CloudWatchLogsClientConfig } from '@aws-sdk/client-cloudwatch-logs'
+import CloudWatchClient, { type RetentionInDays } from './CloudWatchClient'
+import {
+  type CloudWatchLogsClientConfig,
+  type CloudWatchLogsClient,
+} from '@aws-sdk/client-cloudwatch-logs'
 import { type LogItem, type LogCallback } from './LogItem'
 import Relay, { type RelayClient } from './Relay'
 
@@ -11,6 +14,8 @@ import Relay, { type RelayClient } from './Relay'
  * Combines Winston transport options with CloudWatch client and relay settings.
  */
 export interface CloudWatchTransportOptions extends TransportStreamOptions {
+  /** Transport name used by Winston to identify this transport. Default: `'cloudwatch'`. */
+  readonly name?: string
   /** CloudWatch log group name (1-512 characters). */
   readonly logGroupName: string
   /** CloudWatch log stream name (1-512 characters). */
@@ -30,6 +35,12 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
   readonly timeout?: number
   /** Maximum event size in bytes, including 26 bytes of per-event overhead. Messages exceeding the limit are truncated. Default: `1_048_576` (1 MB). */
   readonly maxEventSize?: number
+  /** When `true`, format log messages as JSON objects. Ignored if `formatLog` or `formatLogItem` is provided. */
+  readonly jsonMessage?: boolean
+  /** Set the retention policy on the log group (in days). Works on pre-existing groups too. */
+  readonly retentionInDays?: RetentionInDays
+  /** Pre-built AWS SDK client. When provided, `awsConfig` is ignored and the client is not destroyed on close. */
+  readonly cloudWatchLogs?: CloudWatchLogsClient
 
   /** Minimum interval in milliseconds between batch submissions. Default: `2000`. */
   readonly submissionInterval?: number
@@ -61,6 +72,7 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
  * ```
  */
 export default class CloudWatchTransport extends Transport {
+  readonly name: string
   private readonly relay: Relay<LogItem>
   // err is mutable by design since it's often enriched with additional context before being emitted, but we only read from it so we accept a mutable type for convenience
   // eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
@@ -70,6 +82,7 @@ export default class CloudWatchTransport extends Transport {
   // eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
   constructor(options: CloudWatchTransportOptions) {
     super(options)
+    this.name = options.name ?? 'cloudwatch'
 
     const client: RelayClient<LogItem> = new CloudWatchClient(
       options.logGroupName,
@@ -80,6 +93,11 @@ export default class CloudWatchTransport extends Transport {
     this.relay = new Relay<LogItem>(client, options)
     this.relay.on('error', this.onRelayError)
     this.relay.start()
+  }
+
+  /** Returns a promise that resolves when the queue has been fully drained or the timeout expires. */
+  async flush(timeout?: number): Promise<void> {
+    await this.relay.flush(timeout)
   }
 
   /** Stops the relay, cleans up listeners, and emits `'close'`. */

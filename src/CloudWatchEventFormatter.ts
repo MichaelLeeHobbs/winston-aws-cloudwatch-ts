@@ -21,6 +21,8 @@ export interface CloudWatchEventFormatterOptions {
    * @defaultValue {@link DEFAULT_MAX_EVENT_SIZE | 1_048_576} (1 MB)
    */
   readonly maxEventSize?: number
+  /** When `true`, format log messages as JSON objects. Ignored if `formatLog` or `formatLogItem` is provided. */
+  readonly jsonMessage?: boolean
 }
 
 /**
@@ -55,7 +57,12 @@ export default class CloudWatchEventFormatter {
   private readonly _formatLogItem: (item: LogItem) => { message: string; timestamp: number }
   private readonly maxMessageLength: number
 
-  constructor({ formatLog, formatLogItem, maxEventSize }: CloudWatchEventFormatterOptions = {}) {
+  constructor({
+    formatLog,
+    formatLogItem,
+    maxEventSize,
+    jsonMessage,
+  }: CloudWatchEventFormatterOptions = {}) {
     if (
       maxEventSize !== undefined &&
       (!Number.isFinite(maxEventSize) ||
@@ -66,18 +73,30 @@ export default class CloudWatchEventFormatter {
       )
     }
     this.maxMessageLength = (maxEventSize ?? DEFAULT_MAX_EVENT_SIZE) - EVENT_OVERHEAD_BYTES
+    this._formatLog = this.resolveFormatLog(formatLog, formatLogItem, jsonMessage)
+    this._formatLogItem = this.resolveFormatLogItem(formatLog, formatLogItem)
+  }
 
-    if (typeof formatLog === 'function') {
-      this._formatLog = formatLog
-    } else {
-      this._formatLog = this.defaultFormatLog.bind(this)
+  private resolveFormatLog(
+    formatLog: CloudWatchEventFormatterOptions['formatLog'],
+    formatLogItem: CloudWatchEventFormatterOptions['formatLogItem'],
+    jsonMessage: boolean | undefined
+  ): (item: LogItem) => string {
+    if (typeof formatLog === 'function') return formatLog
+    if (jsonMessage === true && typeof formatLogItem !== 'function') {
+      return this.jsonFormatLog.bind(this)
     }
+    return this.defaultFormatLog.bind(this)
+  }
 
+  private resolveFormatLogItem(
+    formatLog: CloudWatchEventFormatterOptions['formatLog'],
+    formatLogItem: CloudWatchEventFormatterOptions['formatLogItem']
+  ): (item: LogItem) => { message: string; timestamp: number } {
     if (typeof formatLogItem === 'function' && typeof formatLog !== 'function') {
-      this._formatLogItem = formatLogItem
-    } else {
-      this._formatLogItem = this.defaultFormatLogItem.bind(this)
+      return formatLogItem
     }
+    return this.defaultFormatLogItem.bind(this)
   }
 
   /** Returns the log-message formatter function. */
@@ -110,8 +129,36 @@ export default class CloudWatchEventFormatter {
     const meta = item.meta
     const metaString =
       meta != null && Object.keys(meta).length > 0 ? ` ${JSON.stringify(meta, null, 2)}` : ''
-    const formatted = `[${level}] ${message}${metaString}`
+    return this.truncateMessage(`[${level}] ${message}${metaString}`)
+  }
 
+  /**
+   * JSON message formatter.
+   *
+   * Produces a flat JSON object with `level`, `message`, `timestamp`,
+   * and any metadata keys spread in. Falls back to a plain-text format
+   * when metadata contains circular references.
+   */
+  private jsonFormatLog(item: LogItem): string {
+    const entry: Record<string, unknown> = {
+      level: item.level,
+      message: item.message,
+      timestamp: item.date,
+      ...(item.meta ?? {}),
+    }
+    try {
+      return this.truncateMessage(JSON.stringify(entry))
+    } catch {
+      const level = item.level.toUpperCase()
+      return `[${level}] ${item.message} [circular reference in metadata]`
+    }
+  }
+
+  /**
+   * Truncates a formatted string to the configured byte limit, appending
+   * a `...[truncated]` suffix. Avoids splitting multi-byte UTF-8 characters.
+   */
+  private truncateMessage(formatted: string): string {
     if (Buffer.byteLength(formatted, 'utf8') <= this.maxMessageLength) {
       return formatted
     }

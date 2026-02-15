@@ -235,6 +235,106 @@ describe('CloudWatchEventFormatter', () => {
     })
   })
 
+  describe('jsonMessage', () => {
+    it('formats a log item as JSON when jsonMessage is true', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true })
+      const item = {
+        date: 123456789,
+        level: 'info',
+        message: 'Hello, world',
+        meta: { foo: 'bar' },
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      const parsed = JSON.parse(msg) as Record<string, unknown>
+      expect(parsed).toEqual({
+        level: 'info',
+        message: 'Hello, world',
+        timestamp: 123456789,
+        foo: 'bar',
+      })
+    })
+
+    it('produces valid JSON when meta is undefined', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true })
+      const item = {
+        date: 100,
+        level: 'warn',
+        message: 'no meta',
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      const parsed = JSON.parse(msg) as Record<string, unknown>
+      expect(parsed).toEqual({
+        level: 'warn',
+        message: 'no meta',
+        timestamp: 100,
+      })
+    })
+
+    it('produces valid JSON when meta is empty', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true })
+      const item = {
+        date: 200,
+        level: 'debug',
+        message: 'empty meta',
+        meta: {},
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      const parsed = JSON.parse(msg) as Record<string, unknown>
+      expect(parsed).toEqual({
+        level: 'debug',
+        message: 'empty meta',
+        timestamp: 200,
+      })
+    })
+
+    it('falls back to plain text on circular reference', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true })
+      const circular: Record<string, unknown> = {}
+      circular.self = circular
+      const item = {
+        date: 0,
+        level: 'error',
+        message: 'boom',
+        meta: circular,
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      expect(msg).toBe('[ERROR] boom [circular reference in metadata]')
+    })
+
+    it('is ignored when formatLog is provided', () => {
+      const formatLog = (): string => 'custom'
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true, formatLog })
+      expect(formatter.formatLog).toBe(formatLog)
+    })
+
+    it('is ignored when formatLogItem is provided', () => {
+      const formatLogItem = (): { timestamp: number; message: string } => ({
+        timestamp: 0,
+        message: 'custom',
+      })
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true, formatLogItem })
+      expect(formatter.formatLogItem).toBe(formatLogItem)
+    })
+
+    it('truncates oversized JSON messages', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true, maxEventSize: 200 })
+      const maxMessage = 200 - EVENT_OVERHEAD_BYTES
+      const item = {
+        date: 0,
+        level: 'info',
+        message: 'x'.repeat(500),
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      expect(Buffer.byteLength(msg, 'utf8')).toBeLessThanOrEqual(maxMessage)
+      expect(msg).toMatch(/\.\.\.\[truncated]$/)
+    })
+  })
+
   describe('immutability', () => {
     it('formatLog getter returns the stored function', () => {
       const formatter = new CloudWatchEventFormatter()

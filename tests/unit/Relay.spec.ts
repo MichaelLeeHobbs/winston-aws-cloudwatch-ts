@@ -226,6 +226,16 @@ describe('Relay', () => {
       expect(item.callback).toHaveBeenCalledTimes(1)
     })
 
+    it('resolves flush when stop() is called during a pending flush', async () => {
+      const client = new MockClient<TestItem>()
+      const relay = createRelay(client, { submissionInterval: 60_000 })
+      relay.start()
+      relay.submit(createItem())
+      const flushPromise = relay.flush(5000)
+      relay.stop()
+      await expect(flushPromise).resolves.toBeUndefined()
+    })
+
     it('does not emit error when submission fails after stop', async () => {
       let rejectSubmit!: (err: Error) => void
       let signalSubmitCalled!: () => void
@@ -253,6 +263,51 @@ describe('Relay', () => {
       await setTimeout(10)
       // onError bails because queue is null — no error emitted
       expect(errorSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('flush()', () => {
+    it('resolves immediately when queue is empty', async () => {
+      const relay = createRelay(new MockClient())
+      relay.start()
+      await expect(relay.flush()).resolves.toBeUndefined()
+    })
+
+    it('resolves immediately when relay is not started', async () => {
+      const relay = createRelay(new MockClient())
+      await expect(relay.flush()).resolves.toBeUndefined()
+    })
+
+    it('resolves after draining queued items', async () => {
+      const submissionInterval = 50
+      const client = new MockClient<TestItem>()
+      const relay = createRelay(client, { submissionInterval })
+      relay.start()
+      const items = [createItem(), createItem(), createItem()]
+      for (const item of items) relay.submit(item)
+      await relay.flush()
+      expect(client.submitted).toEqual(items)
+    })
+
+    it('resolves on timeout when queue cannot drain', async () => {
+      // Client never resolves, so the queue can't drain
+      let signalSubmitCalled!: () => void
+      const submitCalled = new Promise<void>(r => {
+        signalSubmitCalled = r
+      })
+      const client = {
+        submit: () =>
+          new Promise<void>(() => {
+            signalSubmitCalled()
+          }),
+      }
+      const relay = new Relay<TestItem>(client, { submissionInterval: 10 })
+      relays.push(relay)
+      relay.start()
+      relay.submit(createItem())
+      await submitCalled
+      // Flush with a very short timeout
+      await expect(relay.flush(50)).resolves.toBeUndefined()
     })
   })
 })

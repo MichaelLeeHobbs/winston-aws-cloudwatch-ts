@@ -25,15 +25,25 @@ jest.mock('@aws-sdk/client-cloudwatch-logs', () => {
       Object.assign(this, input)
     }
   }
+  class PutRetentionPolicyCommand {
+    constructor(input: Record<string, unknown>) {
+      Object.assign(this, input)
+    }
+  }
   return {
     CloudWatchLogsClient,
     CreateLogGroupCommand,
     CreateLogStreamCommand,
     PutLogEventsCommand,
+    PutRetentionPolicyCommand,
   }
 })
 
-import CloudWatchClient, { type CloudWatchClientOptions } from '../../src/CloudWatchClient'
+import CloudWatchClient, {
+  type CloudWatchClientOptions,
+  MAX_BATCH_BYTES,
+} from '../../src/CloudWatchClient'
+import { EVENT_OVERHEAD_BYTES } from '../../src/CloudWatchEventFormatter'
 import { type LogItem } from '../../src/LogItem'
 
 const logGroupName = 'testGroup'
@@ -54,6 +64,7 @@ interface CreateClientOptions {
   groupErrorCode?: string | null
   streamErrorCode?: string | null
   putRejectionCode?: string | null
+  retentionErrorCode?: string | null
 }
 
 const createClient = (options?: CreateClientOptions) => {
@@ -62,6 +73,7 @@ const createClient = (options?: CreateClientOptions) => {
     groupErrorCode: null,
     streamErrorCode: null,
     putRejectionCode: null,
+    retentionErrorCode: null,
     ...options,
   }
 
@@ -87,6 +99,10 @@ const createClient = (options?: CreateClientOptions) => {
       } else if (command.constructor.name === 'CreateLogStreamCommand') {
         return opts.streamErrorCode
           ? Promise.reject(createErrorWithCode(opts.streamErrorCode))
+          : Promise.resolve()
+      } else if (command.constructor.name === 'PutRetentionPolicyCommand') {
+        return opts.retentionErrorCode
+          ? Promise.reject(createErrorWithCode(opts.retentionErrorCode))
           : Promise.resolve()
       }
       throw new Error(`Unexpected command: ${String(command.constructor.name)}`)
@@ -216,6 +232,22 @@ describe('CloudWatchClient', () => {
     })
   })
 
+  describe('chronological sorting', () => {
+    it('sorts log events by timestamp before sending', async () => {
+      const { client, sendStub } = createClient()
+      const batch: LogItem[] = [
+        { date: 3000, level: 'info', message: 'third', callback: () => undefined },
+        { date: 1000, level: 'info', message: 'first', callback: () => undefined },
+        { date: 2000, level: 'info', message: 'second', callback: () => undefined },
+      ]
+      await client.submit(batch)
+      const putCall = sendStub.getCall(0)
+      const command = putCall.args[0] as Record<string, unknown>
+      const logEvents = command.logEvents as { timestamp: number; message: string }[]
+      expect(logEvents.map(e => e.timestamp)).toEqual([1000, 2000, 3000])
+    })
+  })
+
   describe('options.formatLog', () => {
     it('uses the custom formatter', async () => {
       const formatLog = sinon.spy((item: LogItem) => {
@@ -295,6 +327,95 @@ describe('CloudWatchClient', () => {
     })
   })
 
+  describe('options.retentionInDays', () => {
+    it('sends PutRetentionPolicyCommand when retentionInDays is set', async () => {
+      const { client, sendStub } = createClient({
+        clientOptions: { retentionInDays: 30 },
+      })
+      const batch = createBatch(1)
+      await client.submit(batch)
+      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
+      expect(commands).toContain('PutRetentionPolicyCommand')
+    })
+
+    it('passes correct parameters to PutRetentionPolicyCommand', async () => {
+      const { client, sendStub } = createClient({
+        clientOptions: { retentionInDays: 90 },
+      })
+      await client.submit(createBatch(1))
+      const retentionCall = sendStub
+        .getCalls()
+        .find(c => (c.args[0] as CommandWithName).constructor.name === 'PutRetentionPolicyCommand')
+      const command = retentionCall!.args[0] as Record<string, unknown>
+      expect(command.logGroupName).toBe(logGroupName)
+      expect(command.retentionInDays).toBe(90)
+    })
+
+    it('skips PutRetentionPolicyCommand when retentionInDays is omitted', async () => {
+      const { client, sendStub } = createClient()
+      await client.submit(createBatch(1))
+      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
+      expect(commands).not.toContain('PutRetentionPolicyCommand')
+    })
+
+    it('works without createLogGroup', async () => {
+      const { client, sendStub } = createClient({
+        clientOptions: { retentionInDays: 7 },
+      })
+      await client.submit(createBatch(1))
+      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
+      expect(commands).toContain('PutRetentionPolicyCommand')
+      expect(commands).not.toContain('CreateLogGroupCommand')
+    })
+
+    it('propagates errors from PutRetentionPolicyCommand', async () => {
+      const { client } = createClient({
+        clientOptions: { retentionInDays: 14 },
+        retentionErrorCode: 'OperationAbortedException',
+      })
+      await expect(client.submit(createBatch(1))).rejects.toThrow('Whoopsie daisies')
+    })
+
+    it('rejects invalid retentionInDays values', () => {
+      expect(
+        () =>
+          new CloudWatchClient(logGroupName, logStreamName, {
+            retentionInDays: 42 as never,
+          })
+      ).toThrow('retentionInDays must be one of:')
+    })
+  })
+
+  describe('options.cloudWatchLogs (client injection)', () => {
+    it('uses the injected client for API calls', async () => {
+      const injectedClient = { send: sinon.stub().resolves({}), destroy: sinon.stub() }
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        cloudWatchLogs: injectedClient as never,
+      })
+      await client.submit(createBatch(1))
+      expect(injectedClient.send.callCount).toBe(1)
+    })
+
+    it('does not destroy the injected client', () => {
+      const injectedClient = { send: sinon.stub().resolves({}), destroy: sinon.stub() }
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        cloudWatchLogs: injectedClient as never,
+      })
+      client.destroy()
+      expect(injectedClient.destroy.callCount).toBe(0)
+    })
+
+    it('destroys internally created client', () => {
+      const client = new CloudWatchClient(logGroupName, logStreamName)
+      const destroyStub = sinon.stub(
+        (client as unknown as Record<string, unknown>).client as Record<string, unknown>,
+        'destroy'
+      )
+      client.destroy()
+      expect(destroyStub.callCount).toBe(1)
+    })
+  })
+
   describe('options.createLogStream', () => {
     it('creates the log stream', async () => {
       const { client, sendStub } = createClient({
@@ -322,6 +443,88 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       await expect(client.submit(batch)).rejects.toThrow()
+    })
+  })
+
+  describe('byte-based batch splitting', () => {
+    it('sends a single batch when under the byte limit', async () => {
+      const { client, sendStub } = createClient()
+      await client.submit(createBatch(5))
+      const putCalls = sendStub
+        .getCalls()
+        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      expect(putCalls).toHaveLength(1)
+    })
+
+    it('splits into multiple calls when batch exceeds byte limit', async () => {
+      const { client, sendStub } = createClient()
+      // Each message: ~100KB of payload + 26 bytes overhead ≈ 100KB per event
+      // 15 events ≈ 1.5 MB > 1 MB limit → should split
+      const messageSize = 100_000
+      const batch: LogItem[] = Array.from({ length: 15 }, (_, i) => ({
+        date: i,
+        level: 'info',
+        message: 'x'.repeat(messageSize),
+        callback: () => undefined,
+      }))
+      await client.submit(batch)
+      const putCalls = sendStub
+        .getCalls()
+        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      expect(putCalls.length).toBeGreaterThan(1)
+      // Total events across all calls should equal original batch size
+      const totalEvents = putCalls.reduce((sum, call) => {
+        const cmd = call.args[0] as Record<string, unknown>
+        return sum + (cmd.logEvents as unknown[]).length
+      }, 0)
+      expect(totalEvents).toBe(15)
+    })
+
+    it('handles a single oversized event without error', async () => {
+      const { client, sendStub } = createClient()
+      // Single event larger than MAX_BATCH_BYTES — still sent (batch starts empty)
+      const batch: LogItem[] = [
+        {
+          date: 1,
+          level: 'info',
+          message: 'x'.repeat(MAX_BATCH_BYTES),
+          callback: () => undefined,
+        },
+      ]
+      await client.submit(batch)
+      const putCalls = sendStub
+        .getCalls()
+        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      expect(putCalls).toHaveLength(1)
+    })
+
+    it('respects both count and byte limits', async () => {
+      const { client, sendStub } = createClient()
+      // Each event ~50KB + overhead; 25 events ≈ 1.25 MB, should need 2 PutLogEvents calls
+      const batch: LogItem[] = Array.from({ length: 25 }, (_, i) => ({
+        date: i,
+        level: 'info',
+        message: 'y'.repeat(50_000),
+        callback: () => undefined,
+      }))
+      await client.submit(batch)
+      const putCalls = sendStub
+        .getCalls()
+        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      expect(putCalls.length).toBeGreaterThanOrEqual(2)
+      // Verify each sub-batch is within byte limit
+      for (const call of putCalls) {
+        const cmd = call.args[0] as Record<string, unknown>
+        const events = cmd.logEvents as { message: string }[]
+        const totalBytes = events.reduce(
+          (sum, e) => sum + Buffer.byteLength(e.message, 'utf8') + EVENT_OVERHEAD_BYTES,
+          0
+        )
+        // First event always added even if it exceeds, but the rest should stay under
+        if (events.length > 1) {
+          expect(totalBytes).toBeLessThanOrEqual(MAX_BATCH_BYTES)
+        }
+      }
     })
   })
 })

@@ -3,6 +3,7 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals'
 const mockStart = jest.fn()
 const mockStop = jest.fn()
 const mockSubmit = jest.fn()
+const mockFlush = jest.fn<(timeout?: number) => Promise<void>>().mockResolvedValue(undefined)
 const mockOn = jest.fn()
 
 jest.mock('../../src/Relay', () => {
@@ -11,6 +12,7 @@ jest.mock('../../src/Relay', () => {
     start = mockStart
     stop = mockStop
     submit = mockSubmit
+    flush = mockFlush
   }
   // Also capture the on() calls
   const origOn = MockRelay.prototype.on
@@ -49,6 +51,23 @@ describe('CloudWatchTransport', () => {
     })
     expect(transport).toBeDefined()
     expect(mockStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('has default name "cloudwatch"', () => {
+    const transport = new CloudWatchTransport({
+      logGroupName: 'test-group',
+      logStreamName: 'test-stream',
+    })
+    expect((transport as unknown as Record<string, unknown>).name).toBe('cloudwatch')
+  })
+
+  it('allows custom name override', () => {
+    const transport = new CloudWatchTransport({
+      logGroupName: 'test-group',
+      logStreamName: 'test-stream',
+      name: 'my-custom-transport',
+    })
+    expect((transport as unknown as Record<string, unknown>).name).toBe('my-custom-transport')
   })
 
   it('registers an error listener on relay', () => {
@@ -94,6 +113,25 @@ describe('CloudWatchTransport', () => {
     })
     transport.close()
     expect(mockStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('flush() delegates to relay.flush()', async () => {
+    const transport = new CloudWatchTransport({
+      logGroupName: 'test-group',
+      logStreamName: 'test-stream',
+    })
+    await transport.flush()
+    expect(mockFlush).toHaveBeenCalledTimes(1)
+    expect(mockFlush).toHaveBeenCalledWith(undefined)
+  })
+
+  it('flush() passes timeout to relay.flush()', async () => {
+    const transport = new CloudWatchTransport({
+      logGroupName: 'test-group',
+      logStreamName: 'test-stream',
+    })
+    await transport.flush(5000)
+    expect(mockFlush).toHaveBeenCalledWith(5000)
   })
 
   it('forwards error events from relay', () => {

@@ -14,6 +14,11 @@ A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport f
 - ✅ **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
 - ✅ **Automatic Retries** - Handles sequence token errors automatically
 - ✅ **Customizable Formatting** - Flexible log formatting options
+- ✅ **JSON Formatting** - Optional structured JSON log output
+- ✅ **Retention Policies** - Automatic log group retention configuration
+- ✅ **Byte-Aware Batching** - Respects the 1 MB PutLogEvents payload limit
+- ✅ **Graceful Shutdown** - Flush pending logs before process exit
+- ✅ **Client Injection** - Bring your own `CloudWatchLogsClient`
 - ✅ **Well Tested** - 100% test coverage with Jest
 
 ## Installation
@@ -86,11 +91,14 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 |----------------------|------------------------------|----------|-------------|--------------------------------------------------------------------------------------------------|
 | `logGroupName`       | `string`                     | ✅ Yes   | -           | CloudWatch log group name (1-512 characters)                                                     |
 | `logStreamName`      | `string`                     | ✅ Yes   | -           | CloudWatch log stream name (1-512 characters)                                                    |
-| `awsConfig`          | `CloudWatchLogsClientConfig` | No       | `{}`        | AWS SDK v3 client configuration                                                                  |
+| `awsConfig`          | `CloudWatchLogsClientConfig` | No       | `{}`        | AWS SDK v3 client configuration. Ignored when `cloudWatchLogs` is provided                       |
+| `cloudWatchLogs`     | `CloudWatchLogsClient`       | No       | -           | Pre-built AWS SDK client. When provided, `awsConfig` is ignored and the client is not destroyed on close |
 | `createLogGroup`     | `boolean`                    | No       | `false`     | Automatically create log group if it doesn't exist                                               |
 | `createLogStream`    | `boolean`                    | No       | `false`     | Automatically create log stream if it doesn't exist                                              |
+| `retentionInDays`    | `RetentionInDays`            | No       | -           | Set the retention policy on the log group (e.g. `1`, `7`, `30`, `90`, `365`). Works on pre-existing groups |
 | `timeout`            | `number`                     | No       | `10000`     | Timeout in ms for each AWS SDK call                                                              |
 | `maxEventSize`       | `number`                     | No       | `1048576`   | Max event size in bytes (including 26-byte overhead). Messages exceeding the limit are truncated  |
+| `jsonMessage`        | `boolean`                    | No       | `false`     | Format log messages as JSON objects. Ignored if `formatLog` or `formatLogItem` is provided       |
 | `formatLog`          | `function`                   | No       | -           | Custom function to format log messages. Takes precedence over `formatLogItem`                    |
 | `formatLogItem`      | `function`                   | No       | -           | Custom function to format log items (message + timestamp). Ignored if `formatLog` is provided    |
 | `submissionInterval` | `number`                     | No       | `2000`      | Milliseconds between batch submissions                                                           |
@@ -111,6 +119,23 @@ new CloudWatchTransport({
     return `[${item.level}] ${item.message}${meta}`
   }
 })
+```
+
+### Graceful Shutdown
+
+To ensure all pending logs are delivered before your process exits, call `flush()` followed by `close()`:
+
+```typescript
+// Drain the queue (default timeout: 10 seconds)
+await transport.flush()
+transport.close()
+```
+
+You can also specify a custom timeout in milliseconds:
+
+```typescript
+await transport.flush(5000) // wait up to 5 seconds
+transport.close()
 ```
 
 ## Error Handling
