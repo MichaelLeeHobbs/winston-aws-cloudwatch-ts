@@ -14,3 +14,4 @@ promptHelper.md
 .eslintcache
 REVIEW.md
 ESLINT-PRETTIER-MODERNIZATION.md
+/.claude/settings.local.json
