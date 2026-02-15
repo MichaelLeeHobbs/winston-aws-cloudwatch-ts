@@ -302,7 +302,23 @@ describe('CloudWatchEventFormatter', () => {
         callback: noop,
       }
       const msg = formatter.formatLog(item)
-      expect(msg).toBe('[ERROR] boom [circular reference in metadata]')
+      expect(msg).toBe('[ERROR] boom [JSON serialization failed]')
+    })
+
+    it('does not allow meta to overwrite reserved keys', () => {
+      const formatter = new CloudWatchEventFormatter({ jsonMessage: true })
+      const item = {
+        date: 999,
+        level: 'info',
+        message: 'real message',
+        meta: { level: 'spoofed', message: 'spoofed', timestamp: 0 },
+        callback: noop,
+      }
+      const msg = formatter.formatLog(item)
+      const parsed = JSON.parse(msg) as Record<string, unknown>
+      expect(parsed.level).toBe('info')
+      expect(parsed.message).toBe('real message')
+      expect(parsed.timestamp).toBe(999)
     })
 
     it('is ignored when formatLog is provided', () => {

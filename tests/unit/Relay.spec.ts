@@ -309,5 +309,18 @@ describe('Relay', () => {
       // Flush with a very short timeout
       await expect(relay.flush(50)).resolves.toBeUndefined()
     })
+
+    it('resolves all concurrent callers', async () => {
+      const submissionInterval = 50
+      const client = new MockClient<TestItem>()
+      const relay = createRelay(client, { submissionInterval })
+      relay.start()
+      relay.submit(createItem())
+      relay.submit(createItem())
+      const flush1 = relay.flush()
+      const flush2 = relay.flush()
+      await expect(Promise.all([flush1, flush2])).resolves.toBeDefined()
+      expect(client.submitted.length).toBe(2)
+    })
   })
 })

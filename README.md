@@ -89,6 +89,7 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 
 | Option               | Type                         | Required | Default     | Description                                                                                      |
 |----------------------|------------------------------|----------|-------------|--------------------------------------------------------------------------------------------------|
+| `name`               | `string`                     | No       | `cloudwatch`| Transport name used by Winston to identify this transport                                        |
 | `logGroupName`       | `string`                     | ✅ Yes   | -           | CloudWatch log group name (1-512 characters)                                                     |
 | `logStreamName`      | `string`                     | ✅ Yes   | -           | CloudWatch log stream name (1-512 characters)                                                    |
 | `awsConfig`          | `CloudWatchLogsClientConfig` | No       | `{}`        | AWS SDK v3 client configuration. Ignored when `cloudWatchLogs` is provided                       |

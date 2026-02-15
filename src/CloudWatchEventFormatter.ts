@@ -136,21 +136,22 @@ export default class CloudWatchEventFormatter {
    * JSON message formatter.
    *
    * Produces a flat JSON object with `level`, `message`, `timestamp`,
-   * and any metadata keys spread in. Falls back to a plain-text format
-   * when metadata contains circular references.
+   * and any metadata keys spread in. Reserved keys (`level`, `message`,
+   * `timestamp`) cannot be overwritten by metadata. Falls back to a
+   * plain-text format when serialization fails (e.g. circular references).
    */
   private jsonFormatLog(item: LogItem): string {
     const entry: Record<string, unknown> = {
+      ...(item.meta ?? {}),
       level: item.level,
       message: item.message,
       timestamp: item.date,
-      ...(item.meta ?? {}),
     }
     try {
       return this.truncateMessage(JSON.stringify(entry))
     } catch {
       const level = item.level.toUpperCase()
-      return `[${level}] ${item.message} [circular reference in metadata]`
+      return this.truncateMessage(`[${level}] ${item.message} [JSON serialization failed]`)
     }
   }
 

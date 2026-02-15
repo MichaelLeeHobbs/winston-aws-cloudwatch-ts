@@ -53,7 +53,8 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
   private limiter: Bottleneck | null
   private queue: Queue<T> | null
   private submissionPending = false
-  private flushResolve: (() => void) | null = null
+  private flushWaiters = new Set<() => void>()
+  private flushTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(client: RelayClient<T>, options?: Partial<RelayOptions>) {
     super()
@@ -113,19 +114,28 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     }
     this.scheduleSubmission()
     return new Promise<void>(resolve => {
-      this.flushResolve = resolve
-      const timer = globalThis.setTimeout(() => {
-        this.resolveFlush()
-      }, timeout)
-      timer.unref()
+      this.flushWaiters.add(resolve)
+      // Only create one shared timer for the flush cycle
+      if (!this.flushTimer) {
+        this.flushTimer = globalThis.setTimeout(() => {
+          this.resolveFlush()
+        }, timeout)
+        this.flushTimer.unref()
+      }
     })
   }
 
   private resolveFlush(): void {
-    if (this.flushResolve) {
-      const resolve = this.flushResolve
-      this.flushResolve = null
-      resolve()
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    if (this.flushWaiters.size > 0) {
+      const waiters = [...this.flushWaiters]
+      this.flushWaiters.clear()
+      for (const resolve of waiters) {
+        resolve()
+      }
     }
   }
 
