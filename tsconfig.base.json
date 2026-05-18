@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noErrorTruncation": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
     "noFallthroughCasesInSwitch": true,

@@ -126,20 +126,34 @@ new CloudWatchTransport({
 
 ### Graceful Shutdown
 
-To ensure all pending logs are delivered before your process exits, call `flush()` followed by `close()`:
+`close()` is asynchronous: it performs a best-effort flush of any queued logs
+(bounded by the flush timeout) before stopping the relay. For a graceful
+shutdown, `await` it so pending logs get a chance to ship:
 
 ```typescript
-// Drain the queue (default timeout: 10 seconds)
-await transport.flush()
-transport.close()
+await transport.close()
 ```
 
-You can also specify a custom timeout in milliseconds:
+Winston also calls `close()` automatically when the logger ends, but it does
+**not** await it. If you exit the process immediately (e.g. `process.exit()`),
+await the flush yourself first:
 
 ```typescript
-await transport.flush(5000) // wait up to 5 seconds
-transport.close()
+await transport.flush()      // drain the queue (default timeout: 10 seconds)
+await transport.close()
 ```
+
+You can also specify a custom flush timeout in milliseconds:
+
+```typescript
+await transport.flush(5000)  // wait up to 5 seconds
+await transport.close()
+```
+
+Logs that cannot be delivered before shutdown (or that are evicted when the
+queue is full) are reported to Winston as *not delivered* and silently dropped.
+They are **not** raised as `error` events, so a missed log on shutdown will
+never crash your process.
 
 ## Migration Guides
 
@@ -150,7 +164,11 @@ Coming from another CloudWatch Winston transport? See our migration guides:
 
 ## Error Handling
 
-The transport emits an `error` event when logging to CloudWatch fails. It's recommended to subscribe to this event to avoid crashes:
+The transport emits an `error` event only when a CloudWatch submission fails
+with an unrecoverable error. Dropped logs (queue overflow or shutdown) are
+**not** emitted as errors, so they cannot crash a process that has no `error`
+listener. It's still recommended to subscribe to this event so genuine
+CloudWatch failures are surfaced:
 
 ```typescript
 const transport = new CloudWatchTransport({

@@ -144,7 +144,7 @@ describe('Relay', () => {
       expect(client.submitted).toEqual([item])
     })
 
-    it('calls callback with overflow error when queue is full', () => {
+    it('completes the dropped callback (not-delivered, no Error) when queue is full', () => {
       const client = new MockClient<TestItem>()
       const relay = createRelay(client, { submissionInterval: 60_000, maxQueueSize: 2 })
       relay.start()
@@ -155,9 +155,9 @@ describe('Relay', () => {
       relay.submit(item2)
       // Queue is full (size=2). Next submit evicts the oldest item.
       relay.submit(item3)
-      expect(item1.callback).toHaveBeenCalledWith(
-        expect.objectContaining({ message: 'Queue overflow: log item dropped' })
-      )
+      // Must NOT pass an Error: that would crash a Winston host with no
+      // 'error' listener. Report not-delivered instead.
+      expect(item1.callback).toHaveBeenCalledWith(null, false)
       expect(item2.callback).not.toHaveBeenCalled()
       expect(item3.callback).not.toHaveBeenCalled()
     })
@@ -182,7 +182,7 @@ describe('Relay', () => {
       expect(() => relay.stop()).not.toThrow()
     })
 
-    it('notifies pending items with Transport closed error', () => {
+    it('completes pending item callbacks as not-delivered (no Error) on stop', () => {
       const client = new MockClient<TestItem>()
       // Long interval keeps items queued until stop() drains them
       const relay = createRelay(client, { submissionInterval: 60_000 })
@@ -191,9 +191,9 @@ describe('Relay', () => {
       for (const item of items) relay.submit(item)
       relay.stop()
       for (const item of items) {
-        expect(item.callback).toHaveBeenCalledWith(
-          expect.objectContaining({ message: 'Transport closed' })
-        )
+        // Must NOT pass an Error: a Winston host with no 'error' listener
+        // would crash on shutdown. Report not-delivered instead.
+        expect(item.callback).toHaveBeenCalledWith(null, false)
       }
     })
 

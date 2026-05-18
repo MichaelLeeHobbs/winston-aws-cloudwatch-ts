@@ -106,13 +106,18 @@ describe('CloudWatchTransport', () => {
     expect(submittedItem.message).toBe('')
   })
 
-  it('close() calls relay.stop()', () => {
+  it('close() flushes then stops the relay', async () => {
     const transport = new CloudWatchTransport({
       logGroupName: 'test-group',
       logStreamName: 'test-stream',
     })
-    transport.close()
+    await transport.close()
+    expect(mockFlush).toHaveBeenCalledTimes(1)
     expect(mockStop).toHaveBeenCalledTimes(1)
+    // flush must happen before stop so queued items get a chance to ship
+    expect(mockFlush.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockStop.mock.invocationCallOrder[0]!
+    )
   })
 
   it('flush() delegates to relay.flush()', async () => {

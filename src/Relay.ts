@@ -76,7 +76,7 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     this.queue = new Queue<T>(this.options.maxQueueSize)
   }
 
-  /** Stops the relay, notifies pending item callbacks, and destroys the client. */
+  /** Stops the relay, completes pending item callbacks, and destroys the client. */
   stop(): void {
     this.resolveFlush()
     const pendingItems = this.queue ? this.queue.head(this.queue.size) : []
@@ -86,10 +86,21 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     this.limiter = null
     this.client.destroy?.()
 
-    // Notify Winston that each unsent item failed due to transport shutdown.
-    const err = new Error('Transport closed')
+    if (pendingItems.length > 0) {
+      debug(`stop: completing ${pendingItems.length} unsent item(s) without delivery`)
+    }
+    // Complete each unsent item's callback WITHOUT an Error. Passing an Error
+    // to a Winston write callback makes the transport stream emit 'error',
+    // which the Logger re-emits — crashing the host process if it has no
+    // 'error' handler. Losing buffered logs on shutdown is best-effort, not a
+    // fatal condition, so we report not-delivered (ok=false) instead.
     for (const item of pendingItems) {
-      item.callback(err)
+      try {
+        item.callback(null, false)
+      } catch (err) {
+        /* istanbul ignore next -- a throwing callback must not break shutdown */
+        debug('stop: item callback threw', { error: err })
+      }
     }
   }
 
@@ -98,8 +109,16 @@ export default class Relay<T extends RelayItem> extends EventEmitter {
     if (!this.queue) this.start()
     const dropped = this.queue!.push(item)
     if (dropped) {
-      // Queue is full — the oldest item was evicted. Notify Winston it was lost.
-      dropped.callback(new Error('Queue overflow: log item dropped'))
+      // Queue is full — the oldest item was evicted. Complete its callback
+      // WITHOUT an Error (see stop() for why an Error here is fatal to the
+      // host process) and report it as not-delivered (ok=false).
+      debug('submit: queue overflow, oldest item dropped')
+      try {
+        dropped.callback(null, false)
+      } catch (err) {
+        /* istanbul ignore next -- a throwing callback must not break submit */
+        debug('submit: dropped item callback threw', { error: err })
+      }
     }
     this.scheduleSubmission()
   }

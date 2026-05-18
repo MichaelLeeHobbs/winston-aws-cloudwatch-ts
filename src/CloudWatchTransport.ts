@@ -100,8 +100,26 @@ export default class CloudWatchTransport extends Transport {
     await this.relay.flush(timeout)
   }
 
-  /** Stops the relay, cleans up listeners, and emits `'close'`. */
-  close(): void {
+  /**
+   * Flushes pending log items (best-effort, bounded by the relay's flush
+   * timeout), stops the relay, cleans up listeners, and emits `'close'`.
+   *
+   * Winston calls this on shutdown without awaiting it. For maximum log
+   * delivery during a graceful shutdown, `await transport.flush()` (or await
+   * this method) before the process exits.
+   */
+  // Winston's TransportStream types close() as `() => void` and never awaits
+  // its return; returning a Promise is safe because every rejection is handled
+  // internally (flush is guarded, stop() cannot throw), so this can never
+  // produce an unhandled rejection.
+  // eslint-disable-next-line @typescript-eslint/no-misused-promises
+  async close(): Promise<void> {
+    try {
+      await this.relay.flush()
+    } catch {
+      // flush() resolves on timeout and is not expected to reject; guard
+      // defensively so close() never produces an unhandled rejection.
+    }
     this.relay.removeListener('error', this.onRelayError)
     this.relay.stop()
     this.emit('close')
