@@ -80,7 +80,13 @@ describe('CloudWatchTransport — issue #9 head-of-line memory leak', () => {
 
   function makeTransport(
     client: CloudWatchLogsClient,
-    overrides: Partial<{ submissionInterval: number; maxQueueSize: number }> = {}
+    overrides: Partial<{
+      submissionInterval: number
+      maxQueueSize: number
+      maxRetries: number
+      retryBackoffCap: number
+      batchSize: number
+    }> = {}
   ): CloudWatchTransport {
     const transport = new CloudWatchTransport({
       logGroupName: 'g',
@@ -88,6 +94,10 @@ describe('CloudWatchTransport — issue #9 head-of-line memory leak', () => {
       cloudWatchLogs: client,
       submissionInterval: 5,
       maxQueueSize: 1000,
+      // High retry budget + no backoff keeps these tests fast and isolates
+      // them from the bounded-retry policy (covered by its own test below).
+      maxRetries: 50,
+      retryBackoffCap: 0,
       ...overrides,
     })
     // Real apps attach an 'error' handler (or Winston re-emits and crashes).
@@ -151,5 +161,43 @@ describe('CloudWatchTransport — issue #9 head-of-line memory leak', () => {
     expect(sends()).toBeGreaterThan(3) // it kept trying past the failures
     expect(bufferedWrites(transport)).toBe(0) // stream never stalled
     expect(relayQueueSize(transport)).toBe(0) // queue fully drained after recovery
+  })
+
+  it('drops the stuck head batch after maxRetries so newer logs keep flowing', async () => {
+    // Capture which log messages each PutLogEvents attempt carried, and always
+    // fail. Pre-Option-1 the relay retried batch #1 forever, so only the first
+    // batch's messages would ever be attempted. With bounded retries the stuck
+    // head batch is dropped and later logs get their turn.
+    const attemptedMessages = new Set<string>()
+    const recordingClient = {
+      send: (command: { input?: { logEvents?: { message?: string }[] } }): Promise<never> => {
+        for (const e of command.input?.logEvents ?? []) {
+          if (typeof e.message === 'string') attemptedMessages.add(e.message)
+        }
+        return Promise.reject(
+          Object.assign(new Error('throttled'), { name: 'ThrottlingException' })
+        )
+      },
+      destroy() {},
+    } as unknown as CloudWatchLogsClient
+
+    const batchSize = 2
+    const transport = makeTransport(recordingClient, {
+      maxRetries: 2,
+      retryBackoffCap: 0,
+      submissionInterval: 2,
+      batchSize,
+    })
+    const N = 20
+    for (let i = 0; i < N; i++) {
+      transport.write({ level: 'info', message: `m${i}` })
+    }
+
+    // If the head batch were retried forever, only ~batchSize distinct
+    // messages would ever be attempted. Bounded retry frees the head so many
+    // more get attempted.
+    await waitUntil(() => attemptedMessages.size > batchSize, 3000)
+    expect(attemptedMessages.size).toBeGreaterThan(batchSize)
+    expect(bufferedWrites(transport)).toBe(0)
   })
 })

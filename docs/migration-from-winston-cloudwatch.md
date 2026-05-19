@@ -96,3 +96,15 @@ const logger = winston.createLogger({ transports: [transport] })
 - **Full TypeScript** — Complete type definitions with strict mode
 - **AWS SDK v3** — Modular, tree-shakeable, actively maintained
 - **Automatic log group/stream creation** — Set `createLogGroup: true` and `createLogStream: true`
+
+## Delivery & Backpressure Semantics (v1.2.0+)
+
+**Behavior change to be aware of:** delivery is decoupled from Winston's
+writable stream. A logging call returning means the entry was accepted into a
+**bounded** in-memory queue (`maxQueueSize`), _not_ that it reached CloudWatch.
+Delivery happens asynchronously; a persistent outage can never stall the logger
+or leak memory (oldest logs dropped on overflow; an undeliverable head batch is
+dropped after `maxRetries`). Genuine failures surface via the transport's
+`error` event. See the README's
+[Backpressure & Delivery Semantics](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/README.md#backpressure--delivery-semantics)
+for the full contract.

@@ -16,6 +16,7 @@ pnpm run test                 # Format check + lint + unit tests
 pnpm run test:unit            # Jest unit tests only
 pnpm run test:cover           # Jest with coverage
 pnpm run test:watch           # Jest in watch mode
+pnpm run test:stress          # Sustained memory soak (node --expose-gc; NOT in default test/CI)
 npx jest tests/unit/Queue.spec.ts             # Run a single test file
 npx jest --testNamePattern="pattern"          # Run tests matching a name
 pnpm run test:lint            # ESLint
@@ -29,7 +30,7 @@ pnpm run format               # Prettier write
 Data flows through a pipeline: **Winston Logger → CloudWatchTransport → Relay → CloudWatchClient → AWS CloudWatch Logs API**.
 
 - **CloudWatchTransport** (`src/CloudWatchTransport.ts`) — Winston Transport subclass. Entry point that receives log calls and passes `LogItem` objects to the Relay.
-- **Relay\<T\>** (`src/Relay.ts`) — Generic batching/throttling layer. Uses Bottleneck for rate limiting, a Queue for buffering, and submits batches to any `RelayClient<T>` on a configurable interval. Handles retry on `InvalidSequenceTokenException`.
+- **Relay\<T\>** (`src/Relay.ts`) — Generic batching/throttling layer. Uses Bottleneck for rate limiting, a Queue for buffering, and submits batches to any `RelayClient<T>` on a configurable interval. Retries `InvalidSequenceTokenException` indefinitely; bounds generic failures via `maxRetries` + exponential backoff (`retryBackoffCap`), dropping the head batch after the cap so newer logs are not head-of-line blocked (issue #9).
 - **CloudWatchClient** (`src/CloudWatchClient.ts`) — Implements `RelayClient<LogItem>`. Manages the AWS SDK client, sequence token tracking, and optional auto-creation of log groups/streams.
 - **CloudWatchEventFormatter** (`src/CloudWatchEventFormatter.ts`) — Converts `LogItem` to CloudWatch `InputLogEvent`. Default format: `[LEVEL] message {metadata}`. Customizable via formatter options.
 - **Queue\<T\>** (`src/Queue.ts`) — Simple FIFO queue (array-backed) with `push`, `head(n)`, `remove(n)`, `size`.
@@ -45,12 +46,14 @@ Data flows through a pipeline: **Winston Logger → CloudWatchTransport → Rela
 - Private fields/methods use `_` prefix **only** when a public getter shares the same name (e.g. `private readonly _date` + `get date()`); otherwise no prefix
 - Consistent inline type imports (`import { type Foo } from ...`)
 - Generics for flexibility (`Relay<T>`, `RelayClient<T>`, `Queue<T>`)
+- Broader rationale and the mission-critical TypeScript standard this project follows: [`docs/CodingStandards.md`](docs/CodingStandards.md)
 
 ## Testing
 
 - Jest with ts-jest preset, tests in `tests/unit/`
-- AWS SDK calls stubbed with Sinon
+- AWS SDK calls mocked with [`aws-sdk-client-mock`](https://github.com/m-radzikowski/aws-sdk-client-mock); custom Jest matchers registered via `tests/helpers/setupAwsSdkMock.ts` (`setupFilesAfterEnv`)
 - `tests/helpers/MockClient.ts` provides `MockClient` implementing `RelayClient` for Relay tests
+- `tests/stress/*.stress.ts` — sustained memory soak via `jest.stress.config.ts` / `pnpm run test:stress`; excluded from the default suite and CI (`testPathIgnorePatterns`)
 - Coverage excludes `src/index.ts` (barrel) and `*.d.ts`
 
 ## Build Output

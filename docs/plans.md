@@ -1,6 +1,6 @@
 # Plans
 
-## 1. Example App
+## 1. Example App — _open_
 
 Create a working example application that demonstrates real-world usage of `@ubercode/winston-cloudwatch`.
 
@@ -15,40 +15,29 @@ Create a working example application that demonstrates real-world usage of `@ube
 
 ---
 
-## 2. Migrate to aws-sdk-client-mock for Unit Tests
+## 2. Migrate to aws-sdk-client-mock for Unit Tests — ✅ done (v1.3.0)
 
-Replace the current Sinon-based AWS SDK stubs with [`aws-sdk-client-mock`](https://github.com/m-radzikowski/aws-sdk-client-mock), the AWS-recommended mocking library for SDK v3.
+Replaced the Sinon-based AWS SDK stubs with [`aws-sdk-client-mock`](https://github.com/m-radzikowski/aws-sdk-client-mock) + [`aws-sdk-client-mock-jest`](https://www.npmjs.com/package/aws-sdk-client-mock-jest), the AWS-recommended approach for mocking modular SDK v3.
 
-**Why:**
+**Delivered:**
 
-- Current tests manually stub `CloudWatchLogsClient.prototype.send` with Sinon, which is fragile and doesn't validate command types
-- `aws-sdk-client-mock` provides typed, command-level mocking — mock specific commands (`PutLogEventsCommand`, `CreateLogGroupCommand`, etc.) with type-checked responses
-- [`aws-sdk-client-mock-jest`](https://www.npmjs.com/package/aws-sdk-client-mock-jest) adds custom Jest matchers (e.g. `expect(mock).toHaveReceivedCommand(PutLogEventsCommand)`)
-
-**Scope:**
-
-- Add `aws-sdk-client-mock` and `aws-sdk-client-mock-jest` as dev dependencies
-- Rewrite `CloudWatchClient.spec.ts` to use `mockClient(CloudWatchLogsClient)` instead of Sinon stubs
-- Remove Sinon dependency if no longer needed elsewhere
-- Maintain 100% coverage
+- Added `aws-sdk-client-mock` / `aws-sdk-client-mock-jest` dev deps; removed `sinon` and `@types/sinon`
+- `tests/unit/CloudWatchClient.spec.ts` rewritten on `mockClient(CloudWatchLogsClient)` (typed, command-level: `commandCalls(PutLogEventsCommand)`, etc.)
+- Matchers wired via `tests/helpers/setupAwsSdkMock.ts` (jest `setupFilesAfterEnv`)
+- 100% coverage maintained
 
 **Reference:** [Mocking modular AWS SDK for JavaScript v3 in Unit Tests](https://aws.amazon.com/blogs/developer/mocking-modular-aws-sdk-for-javascript-v3-in-unit-tests/)
 
 ---
 
-## 3. Memory Leak / Stress Test
+## 3. Memory Leak / Stress Test — ✅ done (v1.3.0)
 
-Create a standalone stress test that hammers the transport with sustained high-volume logging to verify there are no memory leaks.
+Regression + soak coverage for the head-of-line memory leak (issue #9).
 
-**Approach:**
+**Delivered:**
 
-- Use `aws-sdk-client-mock` as the backend (from Plan 2) so we can run at full speed without AWS costs
-- Inject the mocked `CloudWatchLogsClient` via the `cloudWatchLogs` option
-- Log tens of thousands of messages over an extended period (e.g. 100k+ messages over several minutes)
-- Monitor `process.memoryUsage()` at intervals and assert that heap growth stays within acceptable bounds
-- Test with various configurations: small batch size, large batch size, fast submission interval, metadata-heavy logs
-- Verify queue backpressure works correctly under sustained load (maxQueueSize)
+- Deterministic unit regression: `tests/unit/CloudWatchTransport.leak.spec.ts` (callback always resolves, bounded buffering, recovery, bounded-retry frees the head batch)
+- Sustained soak harness: `tests/stress/memory.stress.ts` — 100k logs under both steady delivery and permanent failure; asserts `_writableState.bufferedRequestCount` stays 0, the relay queue respects `maxQueueSize`, and GC'd heap growth is bounded
+- Separate `jest.stress.config.ts`; excluded from the default suite (`testPathIgnorePatterns`) and CI
 
-**Location:** `tests/stress/` (separate from unit tests, not part of the default `pnpm test` run)
-
-**Run command:** A dedicated script, e.g. `pnpm run test:stress`
+**Run command:** `pnpm run test:stress` (passes `node --expose-gc`)

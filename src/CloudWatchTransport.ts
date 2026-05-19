@@ -54,6 +54,19 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
   readonly batchSize?: number
   /** Maximum queue size before oldest items are dropped. Default: `10000`. */
   readonly maxQueueSize?: number
+  /**
+   * Consecutive failed delivery attempts of the head batch before it is
+   * dropped (callbacks resolved as not-delivered, never as an `error` event).
+   * Prevents an undeliverable batch from head-of-line blocking newer logs
+   * during a persistent CloudWatch outage. Default: `10`.
+   */
+  readonly maxRetries?: number
+  /**
+   * Upper bound in milliseconds on the exponential backoff delay inserted
+   * between retry attempts of a failing head batch. Set to `0` to disable
+   * backoff. Default: `30000`.
+   */
+  readonly retryBackoffCap?: number
 }
 
 /**

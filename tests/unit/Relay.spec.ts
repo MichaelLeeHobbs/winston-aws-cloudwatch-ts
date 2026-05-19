@@ -9,12 +9,27 @@ interface TestItem extends RelayItem {
 
 const createItem = (): TestItem => ({ callback: jest.fn() })
 
+/** Polls `predicate` on real timers; resolves when true or after `timeoutMs`. */
+const waitUntil = async (predicate: () => boolean, timeoutMs = 3000): Promise<void> => {
+  const start = Date.now()
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) return
+    await setTimeout(10)
+  }
+}
+
 describe('Relay', () => {
   const relays: Relay<TestItem>[] = []
 
   const createRelay = (
     client: MockClient<TestItem>,
-    options?: Partial<{ submissionInterval: number; batchSize: number; maxQueueSize: number }>
+    options?: Partial<{
+      submissionInterval: number
+      batchSize: number
+      maxQueueSize: number
+      maxRetries: number
+      retryBackoffCap: number
+    }>
   ): Relay<TestItem> => {
     const relay = new Relay(client, options)
     relays.push(relay)
@@ -95,11 +110,14 @@ describe('Relay', () => {
       const failures = ['FAIL', 'FAIL', 'FAIL']
       const errorSpy = jest.fn()
       const client = new MockClient<TestItem>(failures)
-      const relay = createRelay(client, { submissionInterval })
+      // retryBackoffCap:0 keeps retries spaced by submissionInterval only
+      // (no exponential backoff); maxRetries defaults to 10 > 3 so the batch
+      // is retried (not dropped) and succeeds on the 4th attempt.
+      const relay = createRelay(client, { submissionInterval, retryBackoffCap: 0 })
       relay.on('error', errorSpy)
       relay.start()
       relay.submit(createItem())
-      await setTimeout(submissionInterval * failures.length * 1.1)
+      await setTimeout(submissionInterval * (failures.length + 1) * 1.1)
       expect(errorSpy).toHaveBeenCalledTimes(failures.length)
     })
 
@@ -129,6 +147,130 @@ describe('Relay', () => {
       expect(errorSpy).toHaveBeenCalledTimes(0)
       // Item should be retried and succeed on second attempt
       expect(client.submitted.length).toBe(1)
+    })
+  })
+
+  describe('retry policy (bounded retry + backoff)', () => {
+    it('drops the head batch after maxRetries (not-delivered, no Error)', async () => {
+      const submissionInterval = 20
+      const maxRetries = 3
+      // More failures than maxRetries so every attempt fails.
+      const client = new MockClient<TestItem>(Array.from({ length: 10 }, () => 'FAIL'))
+      const errorSpy = jest.fn()
+      const relay = createRelay(client, {
+        submissionInterval,
+        maxRetries,
+        retryBackoffCap: 0,
+      })
+      relay.on('error', errorSpy)
+      relay.start()
+      const item = createItem()
+      relay.submit(item)
+      // Allow more than maxRetries intervals to elapse.
+      await setTimeout(submissionInterval * (maxRetries + 3) * 1.1)
+      // Dropped after exactly maxRetries failed attempts.
+      expect(errorSpy).toHaveBeenCalledTimes(maxRetries)
+      // Callback resolved once, WITHOUT an Error (ok=false) — never delivered.
+      expect(item.callback).toHaveBeenCalledTimes(1)
+      expect(item.callback).toHaveBeenCalledWith(null, false)
+      expect(client.submitted).toEqual([])
+    })
+
+    it('does not drop while failures stay below maxRetries (resets on success)', async () => {
+      const submissionInterval = 20
+      // Fails the first 2 calls of each "round", succeeds on the 3rd. With
+      // maxRetries=3 a counter that did NOT reset on success would reach 3 on
+      // the 4th call (2nd failure of round 2) and wrongly drop item2.
+      let call = 0
+      const submitted: TestItem[] = []
+      const client = {
+        submit: (batch: readonly TestItem[]): Promise<void> => {
+          call += 1
+          const failThisCall = call === 1 || call === 2 || call === 4 || call === 5
+          if (failThisCall) {
+            const err = new Error('FAIL')
+            err.name = 'FAIL'
+            return Promise.reject(err)
+          }
+          submitted.push(...batch)
+          return Promise.resolve()
+        },
+      }
+      const relay = new Relay<TestItem>(client, {
+        submissionInterval,
+        maxRetries: 3,
+        retryBackoffCap: 0,
+      })
+      relays.push(relay)
+      relay.on('error', () => {}) // generic errors throw on an EventEmitter with no listener
+      relay.start()
+      const item1 = createItem()
+      relay.submit(item1)
+      await waitUntil(() => item1.callback.mock.calls.length > 0)
+      expect(item1.callback).toHaveBeenCalledWith(null, true)
+      const item2 = createItem()
+      relay.submit(item2)
+      await waitUntil(() => item2.callback.mock.calls.length > 0)
+      // Counter reset after item1 delivered, so item2 is also delivered
+      // (round 2 only saw 2 consecutive failures, not 4).
+      expect(item2.callback).toHaveBeenCalledWith(null, true)
+      expect(submitted).toEqual([item1, item2])
+    })
+
+    it('does not count InvalidSequenceTokenException toward maxRetries', async () => {
+      const submissionInterval = 20
+      // 5 sequence-token failures (> maxRetries) then success.
+      const client = new MockClient<TestItem>(
+        Array.from({ length: 5 }, () => 'InvalidSequenceTokenException')
+      )
+      const errorSpy = jest.fn()
+      const relay = createRelay(client, {
+        submissionInterval,
+        maxRetries: 3,
+        retryBackoffCap: 0,
+      })
+      relay.on('error', errorSpy)
+      relay.start()
+      const item = createItem()
+      relay.submit(item)
+      await waitUntil(() => client.submitted.length > 0)
+      // Never dropped, never surfaced as an error — retried until delivered.
+      expect(errorSpy).not.toHaveBeenCalled()
+      expect(item.callback).toHaveBeenCalledWith(null, true)
+      expect(client.submitted).toEqual([item])
+    })
+
+    it('applies exponentially growing backoff between failed attempts', async () => {
+      const submissionInterval = 20
+      const timestamps: number[] = []
+      const client = {
+        submit: (): Promise<void> => {
+          timestamps.push(Date.now())
+          const err = new Error('FAIL')
+          err.name = 'FAIL'
+          return Promise.reject(err)
+        },
+      }
+      const relay = new Relay<TestItem>(client, {
+        submissionInterval,
+        maxRetries: 100,
+        retryBackoffCap: 10_000,
+      })
+      relays.push(relay)
+      relay.on('error', () => {}) // generic errors throw on an EventEmitter with no listener
+      relay.start()
+      relay.submit(createItem())
+      // Wait until enough attempts accumulate to compare three gaps.
+      await waitUntil(() => timestamps.length >= 4)
+      relay.stop()
+      expect(timestamps.length).toBeGreaterThanOrEqual(4)
+      const gap1 = timestamps[1]! - timestamps[0]!
+      const gap2 = timestamps[2]! - timestamps[1]!
+      const gap3 = timestamps[3]! - timestamps[2]!
+      // gap1 ≈ minTime (no extra after the 1st failure); gaps then grow as the
+      // exponential backoff kicks in.
+      expect(gap2).toBeGreaterThan(gap1)
+      expect(gap3).toBeGreaterThan(gap2)
     })
   })
 

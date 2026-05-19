@@ -5,6 +5,10 @@ const config: Config = {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.spec.ts', '**/*.test.ts'],
+  // tests/stress/ holds long-running memory harnesses (*.stress.ts) run via the
+  // dedicated `pnpm run test:stress` script — never part of the default suite.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/stress/'],
+  setupFilesAfterEnv: ['<rootDir>/tests/helpers/setupAwsSdkMock.ts'],
   collectCoverageFrom: ['src/**/*.ts', '!src/index.ts', '!src/**/*.d.ts'],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],

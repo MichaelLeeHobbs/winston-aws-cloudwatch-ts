@@ -108,6 +108,8 @@ logger.info('Hello CloudWatch!', { userId: 123, action: 'login' })
 | `submissionInterval` | `number`                     | No       | `2000`      | Milliseconds between batch submissions                                                           |
 | `batchSize`          | `number`                     | No       | `20`        | Maximum number of logs per batch                                                                 |
 | `maxQueueSize`       | `number`                     | No       | `10000`     | Maximum queued log items (oldest dropped when full)                                              |
+| `maxRetries`         | `number`                     | No       | `10`        | Consecutive failed delivery attempts of the head batch before it is dropped (frees head-of-line) |
+| `retryBackoffCap`    | `number`                     | No       | `30000`     | Upper bound (ms) on the exponential backoff between failed retries. `0` disables backoff         |
 | `level`              | `string`                     | No       | -           | Minimum log level for this transport (inherited from Winston)                                    |
 | `silent`             | `boolean`                    | No       | `false`     | Suppress all output (inherited from Winston)                                                     |
 | `handleExceptions`   | `boolean`                    | No       | `false`     | Handle uncaught exceptions (inherited from Winston)                                              |
@@ -184,8 +186,13 @@ Practical implications:
   logging call.
 - For maximum delivery on shutdown, `await transport.flush()` /
   `await transport.close()` (see [Graceful Shutdown](#graceful-shutdown)).
+- During a **persistent** outage a failing batch is retried with exponential
+  backoff (capped by `retryBackoffCap`) and, after `maxRetries` consecutive
+  failures, dropped — so an undeliverable head batch never head-of-line blocks
+  newer logs. Each failed attempt is surfaced as an `error` event.
 
-Tune the buffer with `maxQueueSize`, `batchSize`, and `submissionInterval`.
+Tune the buffer with `maxQueueSize`, `batchSize`, `submissionInterval`,
+`maxRetries`, and `retryBackoffCap`.
 
 ## Migration Guides
 
@@ -273,6 +280,9 @@ pnpm test
 # Run tests with coverage
 pnpm test:cover
 
+# Sustained memory soak (node --expose-gc; not part of `pnpm test` or CI)
+pnpm test:stress
+
 # Build
 pnpm build
 
@@ -282,6 +292,9 @@ pnpm lint
 # Format
 pnpm format
 ```
+
+This project follows the mission-critical TypeScript standard documented in
+[`docs/CodingStandards.md`](docs/CodingStandards.md).
 
 ## License
 

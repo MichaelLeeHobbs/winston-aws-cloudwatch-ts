@@ -1,43 +1,12 @@
-import { describe, it, expect, jest, afterEach } from '@jest/globals'
-import sinon from 'sinon'
-
-// Mock the heavy AWS SDK module to prevent OOM in Jest workers.
-// All send() calls are stubbed by sinon in each test, so the real SDK is never invoked.
-jest.mock('@aws-sdk/client-cloudwatch-logs', () => {
-  class CloudWatchLogsClient {
-    send() {
-      /* stubbed by sinon in tests */
-    }
-    destroy() {}
-  }
-  class CreateLogGroupCommand {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input)
-    }
-  }
-  class CreateLogStreamCommand {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input)
-    }
-  }
-  class PutLogEventsCommand {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input)
-    }
-  }
-  class PutRetentionPolicyCommand {
-    constructor(input: Record<string, unknown>) {
-      Object.assign(this, input)
-    }
-  }
-  return {
-    CloudWatchLogsClient,
-    CreateLogGroupCommand,
-    CreateLogStreamCommand,
-    PutLogEventsCommand,
-    PutRetentionPolicyCommand,
-  }
-})
+import { describe, it, expect, jest, beforeEach } from '@jest/globals'
+import {
+  CloudWatchLogsClient,
+  CreateLogGroupCommand,
+  CreateLogStreamCommand,
+  PutLogEventsCommand,
+  PutRetentionPolicyCommand,
+} from '@aws-sdk/client-cloudwatch-logs'
+import { mockClient } from 'aws-sdk-client-mock'
 
 import CloudWatchClient, {
   type CloudWatchClientOptions,
@@ -55,9 +24,9 @@ const createErrorWithCode = (code: string): Error => {
   return error
 }
 
-interface CommandWithName {
-  constructor: { name: string }
-}
+// aws-sdk-client-mock intercepts every CloudWatchLogsClient#send (real SDK,
+// no network) — the AWS-recommended approach for mocking modular SDK v3.
+const cwMock = mockClient(CloudWatchLogsClient)
 
 interface CreateClientOptions {
   clientOptions?: Partial<CloudWatchClientOptions> | null
@@ -67,7 +36,7 @@ interface CreateClientOptions {
   retentionErrorCode?: string | null
 }
 
-const createClient = (options?: CreateClientOptions) => {
+const createClient = (options?: CreateClientOptions): { client: CloudWatchClient } => {
   const opts: Required<CreateClientOptions> = {
     clientOptions: null,
     groupErrorCode: null,
@@ -77,38 +46,29 @@ const createClient = (options?: CreateClientOptions) => {
     ...options,
   }
 
-  const client = new CloudWatchClient(logGroupName, logStreamName, opts.clientOptions ?? undefined)
-
-  let putPromise: Promise<Record<string, unknown>>
   if (opts.putRejectionCode != null) {
-    const err = createErrorWithCode(opts.putRejectionCode)
-    putPromise = Promise.reject(err)
+    cwMock.on(PutLogEventsCommand).rejects(createErrorWithCode(opts.putRejectionCode))
   } else {
-    putPromise = Promise.resolve({})
+    cwMock.on(PutLogEventsCommand).resolves({})
   }
+  cwMock
+    .on(CreateLogGroupCommand)
+    [
+      opts.groupErrorCode != null ? 'rejects' : 'resolves'
+    ](opts.groupErrorCode != null ? createErrorWithCode(opts.groupErrorCode) : {})
+  cwMock
+    .on(CreateLogStreamCommand)
+    [
+      opts.streamErrorCode != null ? 'rejects' : 'resolves'
+    ](opts.streamErrorCode != null ? createErrorWithCode(opts.streamErrorCode) : {})
+  cwMock
+    .on(PutRetentionPolicyCommand)
+    [
+      opts.retentionErrorCode != null ? 'rejects' : 'resolves'
+    ](opts.retentionErrorCode != null ? createErrorWithCode(opts.retentionErrorCode) : {})
 
-  const sendStub = sinon
-    .stub((client as unknown as Record<string, unknown>).client as Record<string, unknown>, 'send')
-    .callsFake((command: CommandWithName) => {
-      if (command.constructor.name === 'PutLogEventsCommand') {
-        return putPromise
-      } else if (command.constructor.name === 'CreateLogGroupCommand') {
-        return opts.groupErrorCode
-          ? Promise.reject(createErrorWithCode(opts.groupErrorCode))
-          : Promise.resolve()
-      } else if (command.constructor.name === 'CreateLogStreamCommand') {
-        return opts.streamErrorCode
-          ? Promise.reject(createErrorWithCode(opts.streamErrorCode))
-          : Promise.resolve()
-      } else if (command.constructor.name === 'PutRetentionPolicyCommand') {
-        return opts.retentionErrorCode
-          ? Promise.reject(createErrorWithCode(opts.retentionErrorCode))
-          : Promise.resolve()
-      }
-      throw new Error(`Unexpected command: ${String(command.constructor.name)}`)
-    })
-
-  return { client, sendStub }
+  const client = new CloudWatchClient(logGroupName, logStreamName, opts.clientOptions ?? undefined)
+  return { client }
 }
 
 const createBatch = (size: number): LogItem[] =>
@@ -121,8 +81,8 @@ const createBatch = (size: number): LogItem[] =>
   }))
 
 describe('CloudWatchClient', () => {
-  afterEach(() => {
-    sinon.restore()
+  beforeEach(() => {
+    cwMock.reset()
   })
 
   describe('constructor validation', () => {
@@ -185,127 +145,88 @@ describe('CloudWatchClient', () => {
 
   describe('submit()', () => {
     it('calls putLogEvents', async () => {
-      const { client, sendStub } = createClient()
-      const batch = createBatch(1)
-      await client.submit(batch)
-      // Just PutLogEvents (no more DescribeLogStreams)
-      expect(sendStub.callCount).toBe(1)
+      const { client } = createClient()
+      await client.submit(createBatch(1))
+      expect(cwMock.commandCalls(PutLogEventsCommand)).toHaveLength(1)
+      expect(cwMock.calls()).toHaveLength(1)
     })
 
     it('rejects on PutLogEvents errors', async () => {
-      const { client } = createClient({
-        putRejectionCode: 'ThrottlingException',
-      })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow('Whoopsie daisies')
+      const { client } = createClient({ putRejectionCode: 'ThrottlingException' })
+      await expect(client.submit(createBatch(1))).rejects.toThrow('Whoopsie daisies')
     })
 
     it('retries initialization after transient failure', async () => {
-      let callCount = 0
+      cwMock.on(CreateLogGroupCommand).rejectsOnce(new Error('Transient failure')).resolves({})
+      cwMock.on(PutLogEventsCommand).resolves({})
+
       const client = new CloudWatchClient(logGroupName, logStreamName, {
         createLogGroup: true,
       })
-      const sendStub = sinon
-        .stub(
-          (client as unknown as Record<string, unknown>).client as Record<string, unknown>,
-          'send'
-        )
-        .callsFake((command: CommandWithName) => {
-          if (command.constructor.name === 'CreateLogGroupCommand') {
-            callCount++
-            if (callCount === 1) {
-              return Promise.reject(new Error('Transient failure'))
-            }
-            return Promise.resolve()
-          } else if (command.constructor.name === 'PutLogEventsCommand') {
-            return Promise.resolve({})
-          }
-          throw new Error(`Unexpected: ${String(command.constructor.name)}`)
-        })
-
       const batch = createBatch(1)
       await expect(client.submit(batch)).rejects.toThrow('Transient failure')
-      // Second attempt should succeed since initializing was reset
+      // Second attempt should succeed since `initializing` was reset.
       await expect(client.submit(batch)).resolves.not.toThrow()
       // CreateLogGroup(fail) + CreateLogGroup(ok) + PutLogEvents
-      expect(sendStub.callCount).toBeGreaterThanOrEqual(3)
+      expect(cwMock.calls().length).toBeGreaterThanOrEqual(3)
+      expect(cwMock.commandCalls(CreateLogGroupCommand).length).toBeGreaterThanOrEqual(2)
     })
   })
 
   describe('chronological sorting', () => {
     it('sorts log events by timestamp before sending', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       const batch: LogItem[] = [
         { date: 3000, level: 'info', message: 'third', callback: () => undefined },
         { date: 1000, level: 'info', message: 'first', callback: () => undefined },
         { date: 2000, level: 'info', message: 'second', callback: () => undefined },
       ]
       await client.submit(batch)
-      const putCall = sendStub.getCall(0)
-      const command = putCall.args[0] as Record<string, unknown>
-      const logEvents = command.logEvents as { timestamp: number; message: string }[]
+      const command = cwMock.commandCalls(PutLogEventsCommand)[0]!.args[0]
+      const logEvents = command.input.logEvents ?? []
       expect(logEvents.map(e => e.timestamp)).toEqual([1000, 2000, 3000])
     })
   })
 
   describe('options.formatLog', () => {
     it('uses the custom formatter', async () => {
-      const formatLog = sinon.spy((item: LogItem) => {
-        return `CUSTOM__${JSON.stringify(item)}`
-      })
-      const { client } = createClient({
-        clientOptions: { formatLog },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
-      expect(formatLog.calledOnce).toBe(true)
+      const formatLog = jest.fn((item: LogItem) => `CUSTOM__${JSON.stringify(item)}`)
+      const { client } = createClient({ clientOptions: { formatLog } })
+      await client.submit(createBatch(1))
+      expect(formatLog).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('options.formatLogItem', () => {
     it('uses the custom formatter', async () => {
-      const formatLogItem = sinon.spy((item: LogItem) => {
-        return {
-          timestamp: item.date,
-          message: `CUSTOM__${JSON.stringify(item)}`,
-        }
-      })
-      const { client } = createClient({
-        clientOptions: { formatLogItem },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
-      expect(formatLogItem.calledOnce).toBe(true)
+      const formatLogItem = jest.fn((item: LogItem) => ({
+        timestamp: item.date,
+        message: `CUSTOM__${JSON.stringify(item)}`,
+      }))
+      const { client } = createClient({ clientOptions: { formatLogItem } })
+      await client.submit(createBatch(1))
+      expect(formatLogItem).toHaveBeenCalledTimes(1)
     })
 
     it('does not use the custom formatter if formatLog is specified', async () => {
-      const formatLog = sinon.spy((item: LogItem) => {
-        return `CUSTOM__${JSON.stringify(item)}`
-      })
-      const formatLogItem = sinon.spy((item: LogItem) => {
-        return {
-          timestamp: item.date,
-          message: `CUSTOM__${JSON.stringify(item)}`,
-        }
-      })
-      const { client } = createClient({
-        clientOptions: { formatLog, formatLogItem },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
-      expect(formatLogItem.calledOnce).toBe(false)
+      const formatLog = jest.fn((item: LogItem) => `CUSTOM__${JSON.stringify(item)}`)
+      const formatLogItem = jest.fn((item: LogItem) => ({
+        timestamp: item.date,
+        message: `CUSTOM__${JSON.stringify(item)}`,
+      }))
+      const { client } = createClient({ clientOptions: { formatLog, formatLogItem } })
+      await client.submit(createBatch(1))
+      expect(formatLogItem).not.toHaveBeenCalled()
     })
   })
 
   describe('options.createLogGroup', () => {
     it('creates the log group', async () => {
-      const { client, sendStub } = createClient({
-        clientOptions: { createLogGroup: true },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
+      const { client } = createClient({ clientOptions: { createLogGroup: true } })
+      await client.submit(createBatch(1))
       // CreateLogGroup + PutLogEvents
-      expect(sendStub.callCount).toBe(2)
+      expect(cwMock.calls()).toHaveLength(2)
+      expect(cwMock.commandCalls(CreateLogGroupCommand)).toHaveLength(1)
     })
 
     it('does not throw if the log group already exists', async () => {
@@ -313,8 +234,7 @@ describe('CloudWatchClient', () => {
         clientOptions: { createLogGroup: true },
         groupErrorCode: 'ResourceAlreadyExistsException',
       })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).resolves.not.toThrow()
+      await expect(client.submit(createBatch(1))).resolves.not.toThrow()
     })
 
     it('throws if another error occurs', async () => {
@@ -322,50 +242,36 @@ describe('CloudWatchClient', () => {
         clientOptions: { createLogGroup: true },
         groupErrorCode: 'UnicornDoesNotExistException',
       })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow()
+      await expect(client.submit(createBatch(1))).rejects.toThrow()
     })
   })
 
   describe('options.retentionInDays', () => {
     it('sends PutRetentionPolicyCommand when retentionInDays is set', async () => {
-      const { client, sendStub } = createClient({
-        clientOptions: { retentionInDays: 30 },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
-      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
-      expect(commands).toContain('PutRetentionPolicyCommand')
+      const { client } = createClient({ clientOptions: { retentionInDays: 30 } })
+      await client.submit(createBatch(1))
+      expect(cwMock.commandCalls(PutRetentionPolicyCommand)).toHaveLength(1)
     })
 
     it('passes correct parameters to PutRetentionPolicyCommand', async () => {
-      const { client, sendStub } = createClient({
-        clientOptions: { retentionInDays: 90 },
-      })
+      const { client } = createClient({ clientOptions: { retentionInDays: 90 } })
       await client.submit(createBatch(1))
-      const retentionCall = sendStub
-        .getCalls()
-        .find(c => (c.args[0] as CommandWithName).constructor.name === 'PutRetentionPolicyCommand')
-      const command = retentionCall!.args[0] as Record<string, unknown>
-      expect(command.logGroupName).toBe(logGroupName)
-      expect(command.retentionInDays).toBe(90)
+      const command = cwMock.commandCalls(PutRetentionPolicyCommand)[0]!.args[0]
+      expect(command.input.logGroupName).toBe(logGroupName)
+      expect(command.input.retentionInDays).toBe(90)
     })
 
     it('skips PutRetentionPolicyCommand when retentionInDays is omitted', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       await client.submit(createBatch(1))
-      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
-      expect(commands).not.toContain('PutRetentionPolicyCommand')
+      expect(cwMock.commandCalls(PutRetentionPolicyCommand)).toHaveLength(0)
     })
 
     it('works without createLogGroup', async () => {
-      const { client, sendStub } = createClient({
-        clientOptions: { retentionInDays: 7 },
-      })
+      const { client } = createClient({ clientOptions: { retentionInDays: 7 } })
       await client.submit(createBatch(1))
-      const commands = sendStub.getCalls().map(c => (c.args[0] as CommandWithName).constructor.name)
-      expect(commands).toContain('PutRetentionPolicyCommand')
-      expect(commands).not.toContain('CreateLogGroupCommand')
+      expect(cwMock.commandCalls(PutRetentionPolicyCommand)).toHaveLength(1)
+      expect(cwMock.commandCalls(CreateLogGroupCommand)).toHaveLength(0)
     })
 
     it('propagates errors from PutRetentionPolicyCommand', async () => {
@@ -388,43 +294,47 @@ describe('CloudWatchClient', () => {
 
   describe('options.cloudWatchLogs (client injection)', () => {
     it('uses the injected client for API calls', async () => {
-      const injectedClient = { send: sinon.stub().resolves({}), destroy: sinon.stub() }
+      const injectedClient = {
+        send: jest.fn<() => Promise<unknown>>().mockResolvedValue({}),
+        destroy: jest.fn(),
+      }
       const client = new CloudWatchClient(logGroupName, logStreamName, {
         cloudWatchLogs: injectedClient as never,
       })
       await client.submit(createBatch(1))
-      expect(injectedClient.send.callCount).toBe(1)
+      expect(injectedClient.send).toHaveBeenCalledTimes(1)
+      // The shared mock must not have been touched — a custom client was used.
+      expect(cwMock.calls()).toHaveLength(0)
     })
 
     it('does not destroy the injected client', () => {
-      const injectedClient = { send: sinon.stub().resolves({}), destroy: sinon.stub() }
+      const injectedClient = {
+        send: jest.fn<() => Promise<unknown>>().mockResolvedValue({}),
+        destroy: jest.fn(),
+      }
       const client = new CloudWatchClient(logGroupName, logStreamName, {
         cloudWatchLogs: injectedClient as never,
       })
       client.destroy()
-      expect(injectedClient.destroy.callCount).toBe(0)
+      expect(injectedClient.destroy).not.toHaveBeenCalled()
     })
 
     it('destroys internally created client', () => {
       const client = new CloudWatchClient(logGroupName, logStreamName)
-      const destroyStub = sinon.stub(
-        (client as unknown as Record<string, unknown>).client as Record<string, unknown>,
-        'destroy'
-      )
+      const internal = (client as unknown as { client: { destroy: () => void } }).client
+      const destroySpy = jest.spyOn(internal, 'destroy').mockImplementation(() => undefined)
       client.destroy()
-      expect(destroyStub.callCount).toBe(1)
+      expect(destroySpy).toHaveBeenCalledTimes(1)
     })
   })
 
   describe('options.createLogStream', () => {
     it('creates the log stream', async () => {
-      const { client, sendStub } = createClient({
-        clientOptions: { createLogStream: true },
-      })
-      const batch = createBatch(1)
-      await client.submit(batch)
+      const { client } = createClient({ clientOptions: { createLogStream: true } })
+      await client.submit(createBatch(1))
       // CreateLogStream + PutLogEvents
-      expect(sendStub.callCount).toBe(2)
+      expect(cwMock.calls()).toHaveLength(2)
+      expect(cwMock.commandCalls(CreateLogStreamCommand)).toHaveLength(1)
     })
 
     it('does not throw if the log stream already exists', async () => {
@@ -432,8 +342,7 @@ describe('CloudWatchClient', () => {
         clientOptions: { createLogStream: true },
         streamErrorCode: 'ResourceAlreadyExistsException',
       })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).resolves.not.toThrow()
+      await expect(client.submit(createBatch(1))).resolves.not.toThrow()
     })
 
     it('throws if another error occurs', async () => {
@@ -441,23 +350,19 @@ describe('CloudWatchClient', () => {
         clientOptions: { createLogStream: true },
         streamErrorCode: 'UnicornDoesNotExistException',
       })
-      const batch = createBatch(1)
-      await expect(client.submit(batch)).rejects.toThrow()
+      await expect(client.submit(createBatch(1))).rejects.toThrow()
     })
   })
 
   describe('byte-based batch splitting', () => {
     it('sends a single batch when under the byte limit', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       await client.submit(createBatch(5))
-      const putCalls = sendStub
-        .getCalls()
-        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
-      expect(putCalls).toHaveLength(1)
+      expect(cwMock.commandCalls(PutLogEventsCommand)).toHaveLength(1)
     })
 
     it('splits into multiple calls when batch exceeds byte limit', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       // Each message: ~100KB of payload + 26 bytes overhead ≈ 100KB per event
       // 15 events ≈ 1.5 MB > 1 MB limit → should split
       const messageSize = 100_000
@@ -468,20 +373,17 @@ describe('CloudWatchClient', () => {
         callback: () => undefined,
       }))
       await client.submit(batch)
-      const putCalls = sendStub
-        .getCalls()
-        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      const putCalls = cwMock.commandCalls(PutLogEventsCommand)
       expect(putCalls.length).toBeGreaterThan(1)
-      // Total events across all calls should equal original batch size
-      const totalEvents = putCalls.reduce((sum, call) => {
-        const cmd = call.args[0] as Record<string, unknown>
-        return sum + (cmd.logEvents as unknown[]).length
-      }, 0)
+      const totalEvents = putCalls.reduce(
+        (sum, call) => sum + (call.args[0].input.logEvents?.length ?? 0),
+        0
+      )
       expect(totalEvents).toBe(15)
     })
 
     it('handles a single oversized event without error', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       // Single event larger than MAX_BATCH_BYTES — still sent (batch starts empty)
       const batch: LogItem[] = [
         {
@@ -492,14 +394,11 @@ describe('CloudWatchClient', () => {
         },
       ]
       await client.submit(batch)
-      const putCalls = sendStub
-        .getCalls()
-        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
-      expect(putCalls).toHaveLength(1)
+      expect(cwMock.commandCalls(PutLogEventsCommand)).toHaveLength(1)
     })
 
     it('respects both count and byte limits', async () => {
-      const { client, sendStub } = createClient()
+      const { client } = createClient()
       // Each event ~50KB + overhead; 25 events ≈ 1.25 MB, should need 2 PutLogEvents calls
       const batch: LogItem[] = Array.from({ length: 25 }, (_, i) => ({
         date: i,
@@ -508,16 +407,12 @@ describe('CloudWatchClient', () => {
         callback: () => undefined,
       }))
       await client.submit(batch)
-      const putCalls = sendStub
-        .getCalls()
-        .filter(c => (c.args[0] as CommandWithName).constructor.name === 'PutLogEventsCommand')
+      const putCalls = cwMock.commandCalls(PutLogEventsCommand)
       expect(putCalls.length).toBeGreaterThanOrEqual(2)
-      // Verify each sub-batch is within byte limit
       for (const call of putCalls) {
-        const cmd = call.args[0] as Record<string, unknown>
-        const events = cmd.logEvents as { message: string }[]
+        const events = call.args[0].input.logEvents ?? []
         const totalBytes = events.reduce(
-          (sum, e) => sum + Buffer.byteLength(e.message, 'utf8') + EVENT_OVERHEAD_BYTES,
+          (sum, e) => sum + Buffer.byteLength(e.message ?? '', 'utf8') + EVENT_OVERHEAD_BYTES,
           0
         )
         // First event always added even if it exceeds, but the rest should stay under

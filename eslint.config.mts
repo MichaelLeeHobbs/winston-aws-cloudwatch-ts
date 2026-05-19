@@ -28,7 +28,12 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.mts', 'jest.config.ts', 'tsup.config.ts'],
+          allowDefaultProject: [
+            'eslint.config.mts',
+            'jest.config.ts',
+            'jest.stress.config.ts',
+            'tsup.config.ts',
+          ],
         },
         tsconfigRootDir: import.meta.dirname,
       },
