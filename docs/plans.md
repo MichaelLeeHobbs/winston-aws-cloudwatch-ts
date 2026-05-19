@@ -1,17 +1,19 @@
 # Plans
 
-## 1. Example App — _open_
+## 1. Example App — ✅ done
 
-Create a working example application that demonstrates real-world usage of `@ubercode/winston-cloudwatch`.
+Working example demonstrating real-world usage of `@ubercode/winston-cloudwatch`.
 
-**Goals:**
+**Delivered:**
 
-- Minimal Node.js/TypeScript app that sets up Winston with the CloudWatch transport
-- Show common patterns: basic logging, structured metadata, custom formatting, error handling, graceful shutdown
-- Include a README with setup instructions (AWS credentials, region, log group/stream)
-- Runnable with `npx ts-node` or as a compiled script
-
-**Location:** `examples/`
+- `examples/basic-usage.ts` — Winston + CloudWatch transport: basic logging,
+  structured metadata, custom/JSON formatting, transport **and** logger
+  `error` handling, graceful shutdown (`flush` + `close`, `SIGINT`/`SIGTERM`)
+- `examples/README.md` — setup, env-var config table, AWS credential/IAM notes
+- Runnable via `pnpm run example` or `npx ts-node examples/basic-usage.ts`
+  (imports from `../src`, no build step); env-configurable
+- Not shipped to npm (`files` excludes `examples/`); eslint-ignored as
+  illustrative code
 
 ---
 

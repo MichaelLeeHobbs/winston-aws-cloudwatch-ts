@@ -23,7 +23,11 @@ pnpm run test:lint            # ESLint
 pnpm run lint                 # ESLint with --fix
 pnpm run test:format          # Prettier check
 pnpm run format               # Prettier write
+pnpm run example              # Run the example app (examples/basic-usage.ts via ts-node)
 ```
+
+The `examples/` directory holds a runnable sample app (not published to npm,
+eslint-ignored). See `examples/README.md`.
 
 ## Architecture
 

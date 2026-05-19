@@ -13,6 +13,9 @@ export default tseslint.config(
       '**/.git/**',
       '**/.github/**',
       '**/*.d.ts',
+      // Illustrative sample app — kept readable rather than held to the
+      // library's strict lint rules; type-checked via `npx ts-node`.
+      'examples/**',
     ],
   },
 
