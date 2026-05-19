@@ -14,6 +14,7 @@ A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport f
 - **TypeScript** - Full TypeScript support with complete type definitions
 - **AWS SDK v3** - Uses the modern modular AWS SDK v3
 - **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
+- **Bounded Memory** - Delivery is decoupled from Winston's stream; a CloudWatch outage can never stall the logger or leak memory
 - **Automatic Retries** - Handles sequence token errors automatically
 - **Customizable Formatting** - Flexible log formatting options
 - **JSON Formatting** - Optional structured JSON log output
@@ -154,6 +155,37 @@ Logs that cannot be delivered before shutdown (or that are evicted when the
 queue is full) are reported to Winston as *not delivered* and silently dropped.
 They are **not** raised as `error` events, so a missed log on shutdown will
 never crash your process.
+
+## Backpressure & Delivery Semantics
+
+CloudWatch delivery is **decoupled** from Winston's writable stream. When you
+log, the entry is accepted into a bounded in-memory queue and Winston's write
+callback is resolved **immediately** — delivery to CloudWatch then happens
+asynchronously in rate-limited batches.
+
+This is deliberate. If the write callback were deferred until CloudWatch
+confirmed delivery, any *persistent* delivery failure (throttling, request
+timeouts, missing IAM permissions, a CloudWatch outage) would stall Winston's
+serialized objectMode stream at the head-of-line: every subsequent log would
+accumulate, unbounded, in the stream's internal buffer until the process ran
+out of memory. (This is the long-standing leak inherited from the original
+`winston-cloudwatch` / `winston-aws-cloudwatch` lineage — see
+[#9](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/issues/9).)
+
+Practical implications:
+
+- **Memory is strictly bounded** by `maxQueueSize` (default `10000`),
+  regardless of CloudWatch availability. When the queue is full the **oldest**
+  queued log is dropped (reported to Winston as *not delivered*, never as an
+  `error`).
+- **`logger.info(...)` returning does not mean the log reached CloudWatch** —
+  only that it was accepted into the queue. Genuine delivery failures are
+  surfaced via the transport's [`error` event](#error-handling), not via the
+  logging call.
+- For maximum delivery on shutdown, `await transport.flush()` /
+  `await transport.close()` (see [Graceful Shutdown](#graceful-shutdown)).
+
+Tune the buffer with `maxQueueSize`, `batchSize`, and `submissionInterval`.
 
 ## Migration Guides
 

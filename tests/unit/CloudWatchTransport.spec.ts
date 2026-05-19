@@ -91,7 +91,22 @@ describe('CloudWatchTransport', () => {
     expect(submittedItem.level).toBe('info')
     expect(submittedItem.message).toBe('hello')
     expect(submittedItem.meta).toEqual({ extra: 'data' })
-    expect(submittedItem.callback).toBe(callback)
+    // Delivery is decoupled from the Winston stream callback (issue #9): the
+    // relay item carries an internal no-op, not the stream's write callback.
+    expect(typeof submittedItem.callback).toBe('function')
+    expect(submittedItem.callback).not.toBe(callback)
+  })
+
+  it('log() resolves the Winston write callback synchronously on enqueue', () => {
+    const transport = new CloudWatchTransport({
+      logGroupName: 'test-group',
+      logStreamName: 'test-stream',
+    })
+    const callback = jest.fn()
+    transport.log({ level: 'info', message: 'hello' }, callback)
+    // Resolving immediately (rather than on successful delivery) is what keeps
+    // the upstream objectMode Writable draining and prevents the OOM in #9.
+    expect(callback).toHaveBeenCalledTimes(1)
   })
 
   it('log() handles non-string level and message gracefully', () => {

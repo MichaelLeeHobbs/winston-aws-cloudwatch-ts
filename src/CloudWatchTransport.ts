@@ -8,6 +8,12 @@ import {
 import { type LogItem, type LogCallback } from './LogItem'
 import Relay, { type RelayClient } from './Relay'
 
+// Stand-in callback for relay items. CloudWatch delivery is intentionally
+// decoupled from the Winston Writable stream (see `log()`), so the relay no
+// longer drives the stream's write callback — delivery success/failure is
+// surfaced via the relay's `'error'` event instead.
+const noop: LogCallback = (): void => undefined
+
 /**
  * Options for configuring {@link CloudWatchTransport}.
  *
@@ -134,6 +140,23 @@ export default class CloudWatchTransport extends Transport {
     const { level: _level, message: _message, ...rest } = info
     const meta: Record<string, unknown> = { ...rest }
 
-    this.relay.submit({ date: Date.now(), level, message: msg, meta, callback })
+    // Decouple CloudWatch delivery from the Winston Writable stream.
+    //
+    // winston-transport hands us the Writable stream's own write callback. The
+    // transport is an objectMode Writable that serializes writes: until that
+    // callback fires, every subsequent log accumulates in the stream's internal
+    // buffered linked list. If the callback were deferred until CloudWatch
+    // confirmed delivery, any persistent submit() failure (throttling, timeout,
+    // missing IAM, ...) would retry the same head batch forever, never resolve
+    // the callback, stall the stream, and buffer every later log unbounded
+    // until the process OOMs (issue #9).
+    //
+    // Instead, accept the entry into the relay's bounded queue and resolve the
+    // stream callback immediately. Bounded buffering / backpressure is the
+    // relay queue's responsibility (maxQueueSize, oldest dropped on overflow) —
+    // which only works if the upstream stream keeps draining. Delivery
+    // failures are reported via the relay's `'error'` event, not this callback.
+    this.relay.submit({ date: Date.now(), level, message: msg, meta, callback: noop })
+    callback(null)
   }
 }
