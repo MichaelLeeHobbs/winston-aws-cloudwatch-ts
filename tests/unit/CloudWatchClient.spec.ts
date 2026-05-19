@@ -422,4 +422,74 @@ describe('CloudWatchClient', () => {
       }
     })
   })
+
+  describe('options.timeout (abort signal)', () => {
+    it('aborts the request when the configured timeout elapses', async () => {
+      // Inject a client whose send() never resolves on its own — only the
+      // abortSignal from CloudWatchClient can settle it. This exercises the
+      // AbortSignal.timeout(options.timeout) wiring end-to-end.
+      const observedSignals: AbortSignal[] = []
+      const hangingClient = {
+        send: (_cmd: unknown, opts: { abortSignal: AbortSignal }): Promise<never> =>
+          new Promise((_, reject) => {
+            observedSignals.push(opts.abortSignal)
+            opts.abortSignal.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            )
+          }),
+        destroy: () => undefined,
+      }
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        cloudWatchLogs: hangingClient as never,
+        timeout: 50,
+      })
+      const start = Date.now()
+      await expect(client.submit(createBatch(1))).rejects.toThrow('aborted')
+      const elapsed = Date.now() - start
+      // The signal must have fired roughly at the configured timeout.
+      expect(elapsed).toBeGreaterThanOrEqual(40)
+      expect(elapsed).toBeLessThan(1000)
+      expect(observedSignals).toHaveLength(1)
+      expect(observedSignals[0]!.aborted).toBe(true)
+    })
+  })
+
+  describe('concurrent submit() during initialization', () => {
+    it('shares a single CreateLogGroup across concurrent submits (??= memoization)', async () => {
+      // Delay CreateLogGroup so both submits see the same in-flight init promise.
+      cwMock.on(CreateLogGroupCommand).callsFake(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50))
+        return {}
+      })
+      cwMock.on(PutLogEventsCommand).resolves({})
+
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        createLogGroup: true,
+      })
+      await Promise.all([client.submit(createBatch(1)), client.submit(createBatch(1))])
+
+      // Only one CreateLogGroup — both submits awaited the same `initializing`
+      // promise rather than racing. Both submits succeeded → two PutLogEvents.
+      expect(cwMock.commandCalls(CreateLogGroupCommand)).toHaveLength(1)
+      expect(cwMock.commandCalls(PutLogEventsCommand)).toHaveLength(2)
+    })
+
+    it('re-runs initialization after a failed first attempt, then succeeds on the second submit (cached on success)', async () => {
+      // Reject the first init, succeed thereafter. Two sequential submits:
+      // attempt 1 throws + clears the cache; attempt 2 re-runs init and succeeds.
+      // A third submit (concurrent with the second) shares the cached success.
+      cwMock.on(CreateLogGroupCommand).rejectsOnce(new Error('Transient init failure')).resolves({})
+      cwMock.on(PutLogEventsCommand).resolves({})
+
+      const client = new CloudWatchClient(logGroupName, logStreamName, {
+        createLogGroup: true,
+      })
+      await expect(client.submit(createBatch(1))).rejects.toThrow('Transient init failure')
+      // After the failure, two concurrent submits must share the second init.
+      await Promise.all([client.submit(createBatch(1)), client.submit(createBatch(1))])
+      // CreateLogGroup: 1 failed + 1 succeeded = exactly 2 (NOT 3 — concurrent submits share)
+      expect(cwMock.commandCalls(CreateLogGroupCommand)).toHaveLength(2)
+      expect(cwMock.commandCalls(PutLogEventsCommand)).toHaveLength(2)
+    })
+  })
 })

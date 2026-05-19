@@ -241,7 +241,17 @@ describe('Relay', () => {
     })
 
     it('applies exponentially growing backoff between failed attempts', async () => {
-      const submissionInterval = 20
+      // Base 100ms keeps deltas comfortably larger than Windows setTimeout
+      // granularity (~15.6ms). The actual gap between Bottleneck-scheduled
+      // jobs is max(minTime, submissionInterval * (2^(hf-1) - 1)):
+      //   gap1 (after failure 1, extra=0):   ≈ minTime           (≈ 100ms)
+      //   gap2 (after failure 2, extra=1x):  ≈ minTime           (≈ 100ms; extra==minTime)
+      //   gap3 (after failure 3, extra=3x):  ≈ 3*submissionInterval  (≈ 300ms)
+      //   gap4 (after failure 4, extra=7x):  ≈ 7*submissionInterval  (≈ 700ms)
+      // So the first gap where backoff *visibly* dominates minTime is gap3.
+      // Assert formula-based lower bounds from there + monotonic growth into
+      // gap4 — robust to CI/Windows timer jitter (~15ms).
+      const submissionInterval = 100
       const timestamps: number[] = []
       const client = {
         submit: (): Promise<void> => {
@@ -260,17 +270,17 @@ describe('Relay', () => {
       relay.on('error', () => {}) // generic errors throw on an EventEmitter with no listener
       relay.start()
       relay.submit(createItem())
-      // Wait until enough attempts accumulate to compare three gaps.
-      await waitUntil(() => timestamps.length >= 4)
+      // 5 timestamps ≈ 0 + 100 + 100 + 300 + 700 = 1200ms worst-case real time.
+      await waitUntil(() => timestamps.length >= 5, 5000)
       relay.stop()
-      expect(timestamps.length).toBeGreaterThanOrEqual(4)
-      const gap1 = timestamps[1]! - timestamps[0]!
-      const gap2 = timestamps[2]! - timestamps[1]!
+      expect(timestamps.length).toBeGreaterThanOrEqual(5)
       const gap3 = timestamps[3]! - timestamps[2]!
-      // gap1 ≈ minTime (no extra after the 1st failure); gaps then grow as the
-      // exponential backoff kicks in.
-      expect(gap2).toBeGreaterThan(gap1)
-      expect(gap3).toBeGreaterThan(gap2)
+      const gap4 = timestamps[4]! - timestamps[3]!
+      // gap3 must reflect the 3x extra (≥ 2.5x as a tolerance floor).
+      expect(gap3).toBeGreaterThanOrEqual(submissionInterval * 2.5)
+      // gap4 must be at least one full submissionInterval larger than gap3 —
+      // unambiguous growth that timer jitter cannot mask.
+      expect(gap4 - gap3).toBeGreaterThanOrEqual(submissionInterval)
     })
   })
 

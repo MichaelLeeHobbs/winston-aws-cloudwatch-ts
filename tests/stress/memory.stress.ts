@@ -32,6 +32,9 @@ const heapUsedMB = (): number => {
   return process.memoryUsage().heapUsed / 1024 / 1024
 }
 
+/** RSS catches leaks invisible to heapUsed (V8 arenas, off-heap buffers). */
+const rssMB = (): number => process.memoryUsage().rss / 1024 / 1024
+
 function bufferedWrites(transport: CloudWatchTransport): number {
   const state = (transport as unknown as { _writableState: { bufferedRequestCount?: number } })
     ._writableState
@@ -48,8 +51,10 @@ function stop(transport: CloudWatchTransport): void {
 }
 
 // Heap may grow modestly (V8 arenas, JIT) but must NOT scale with the number
-// of logs. Generous bound: a real leak here was hundreds of MB → OOM.
-const MAX_HEAP_GROWTH_MB = 100
+// of logs. The real leak signal was hundreds of MB → OOM.
+const MAX_HEAP_GROWTH_MB = 60
+// RSS is allowed more slack (V8 working set, JIT code, libuv buffers).
+const MAX_RSS_GROWTH_MB = 300
 
 describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
   beforeAll(() => {
@@ -88,6 +93,7 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
       await settle()
       await waitUntil(() => relayQueueSize(transport) === 0)
       const baselineMB = heapUsedMB()
+      const baselineRss = rssMB()
 
       let maxQueueObserved = 0
       for (let written = 0; written < N; written += chunk) {
@@ -104,6 +110,7 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
       }
       await waitUntil(() => relayQueueSize(transport) === 0)
       const endMB = heapUsedMB()
+      const endRss = rssMB()
 
       // The bounded queue is the memory backstop and must never be exceeded.
       expect(maxQueueObserved).toBeLessThanOrEqual(maxQueueSize)
@@ -112,6 +119,9 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
       if (gc) {
         expect(endMB - baselineMB).toBeLessThan(MAX_HEAP_GROWTH_MB)
       }
+      // RSS growth is the coarse leak detector that catches V8-arena / off-heap
+      // regressions that heapUsed misses.
+      expect(endRss - baselineRss).toBeLessThan(MAX_RSS_GROWTH_MB)
     } finally {
       stop(transport)
     }
@@ -150,6 +160,7 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
       }
       await settle()
       const baselineMB = heapUsedMB()
+      const baselineRss = rssMB()
 
       let maxQueueObserved = 0
       let maxBufferedObserved = 0
@@ -166,12 +177,22 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
         maxBufferedObserved = Math.max(maxBufferedObserved, bufferedWrites(transport))
         await settle(5)
       }
-      await settle()
+
+      // Prove the bounded-retry drop path actually fires, not just buffering.
+      // Stop writing and let real time elapse so retries can run; each head
+      // batch fails maxRetries times then is dropped, shrinking the queue.
+      // Pure infinite-retry (no drop) would leave queue.size pinned forever.
+      const queueBeforeDrain = relayQueueSize(transport)
+      await sleep(500)
+      const queueAfterDrain = relayQueueSize(transport)
+      expect(queueAfterDrain).toBeLessThan(queueBeforeDrain)
+
       const endMB = heapUsedMB()
+      const endRss = rssMB()
 
       // Even though delivery NEVER succeeds: the Writable never stalls, the
-      // queue stays bounded, retries actually happened (bounded-retry drops
-      // the head batch so newer logs flow), and heap does not scale with N.
+      // queue stays bounded, retries happen, batches drop, and memory does
+      // not scale with N.
       expect(maxBufferedObserved).toBe(0)
       expect(bufferedWrites(transport)).toBe(0)
       expect(maxQueueObserved).toBeLessThanOrEqual(maxQueueSize)
@@ -179,6 +200,7 @@ describe('CloudWatchTransport — sustained memory soak (Plan 3)', () => {
       if (gc) {
         expect(endMB - baselineMB).toBeLessThan(MAX_HEAP_GROWTH_MB)
       }
+      expect(endRss - baselineRss).toBeLessThan(MAX_RSS_GROWTH_MB)
     } finally {
       stop(transport)
     }
