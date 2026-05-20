@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from '@jest/globals'
 import { type CloudWatchLogsClient } from '@aws-sdk/client-cloudwatch-logs'
 import CloudWatchTransport from '../../src/CloudWatchTransport'
 
-// Sustained high-volume memory/throughput harness for docs/plans.md Plan 3.
+// Sustained high-volume memory/throughput harness (regression for issue #9).
 // NOT part of the default suite or CI — run with:
 //   pnpm run test:stress      (which passes node --expose-gc)
 //

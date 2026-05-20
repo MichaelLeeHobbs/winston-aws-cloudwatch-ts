@@ -6,12 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-### Changed
-
-- `CLAUDE.md` trimmed to current Anthropic best practices (under 200 lines, non-obvious behaviors highlighted); test conventions moved into a path-scoped `.claude/rules/tests.md` so they only load when working in `tests/`.
-
 ### Added
 
+- Dependabot config (`.github/dependabot.yml`) — weekly npm + `github-actions` updates, minor/patch grouped into a single PR per ecosystem so the project stays current with minimal review overhead.
 - End-to-end tests through a real `winston.Logger` (`tests/unit/winston-integration.spec.ts`): asserts message/metadata round-trip, decoupled-delivery contract, and `logger.on('error')` propagation.
 - `AbortSignal.timeout` behavior is now exercised end-to-end in `CloudWatchClient.spec.ts`.
 - Concurrent `CloudWatchClient.initialize()` (`??=` memoization) is tested under both shared-success and failure-then-shared-retry.
@@ -21,6 +18,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Backoff timing assertion in `Relay.spec.ts` no longer flakes on slow/Windows CI: asserts against the explicit formula with tolerance instead of `gap_{n+1} > gap_n` on near-equal first gaps.
 - `CLAUDE.md` no longer claims `CloudWatchClient` performs "sequence token tracking" — AWS SDK v3 manages tokens internally; the code does not.
+
+### Changed
+
+- `CLAUDE.md` trimmed to current Anthropic best practices (under 200 lines, non-obvious behaviors highlighted); test conventions moved into a path-scoped `.claude/rules/tests.md` so they only load when working in `tests/`.
+
+### Removed
+
+- `docs/plans.md` — all three plans (example app, `aws-sdk-client-mock` migration, stress harness) shipped in v1.3.0; the document had outlived its purpose.
 
 ### Changed (CI)
 
