@@ -22,6 +22,10 @@ const config: Config = {
           esModuleInterop: true,
           allowSyntheticDefaultImports: true,
           isolatedModules: true,
+          // TypeScript 6 deprecated `moduleResolution: 'node'` (removed in 7).
+          // Keep using it under ts-jest until we migrate test transform to
+          // 'node16'/'nodenext'; suppress the deprecation in the meantime.
+          ignoreDeprecations: '6.0',
         },
       },
     ],

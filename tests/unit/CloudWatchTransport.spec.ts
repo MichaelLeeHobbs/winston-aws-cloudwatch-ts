@@ -115,7 +115,7 @@ describe('CloudWatchTransport', () => {
       logStreamName: 'test-stream',
     })
     const callback = jest.fn()
-    transport.log({ level: 42, message: undefined } as unknown as Record<string, unknown>, callback)
+    transport.log({ level: 42, message: undefined }, callback)
     const submittedItem = mockSubmit.mock.calls[0]![0] as Record<string, unknown>
     expect(submittedItem.level).toBe('')
     expect(submittedItem.message).toBe('')

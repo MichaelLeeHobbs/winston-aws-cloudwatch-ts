@@ -19,6 +19,8 @@ const config: Config = {
           esModuleInterop: true,
           allowSyntheticDefaultImports: true,
           isolatedModules: true,
+          // TypeScript 6 deprecation; see jest.config.ts for context.
+          ignoreDeprecations: '6.0',
         },
       },
     ],

@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed (tooling)
+
+- `packageManager` bumped to **pnpm 10.33.4** (final 10.x LTS, ahead of pnpm 11). Adds `pnpm.onlyBuiltDependencies` allowlist for the two native-binary helpers (`esbuild`, `unrs-resolver`) per pnpm 10's stricter default.
+- All dev dependencies refreshed to current latest: **ESLint 10**, **TypeScript 6.0**, **globals 17**, **lint-staged 17**, `typescript-eslint` 8.59 (still supports both ESLint 10 and TypeScript <6.1), latest Jest/ts-jest/prettier/rimraf. `@types/node` deliberately pinned to `^20` to match the declared engines floor (`>=20.9.0`).
+- Runtime dependency `@aws-sdk/client-cloudwatch-logs` bumped within `^3` (3.864 → 3.1050).
+- Added `ignoreDeprecations: '6.0'` in `tsconfig.base.json` (for `tsup` DTS's internally-injected `baseUrl`) and in both jest configs (for `moduleResolution: 'node'` used by ts-jest); a follow-up before TypeScript 7 will migrate these off the deprecated options.
+
 ### Added
 
 - Dependabot config (`.github/dependabot.yml`) — weekly npm + `github-actions` updates, minor/patch grouped into a single PR per ecosystem so the project stays current with minimal review overhead.
