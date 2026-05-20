@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-05-19
+
+[GitHub Release](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.3.1)
+
 ### Changed (tooling)
 
 - `packageManager` bumped to **pnpm 10.33.4** (final 10.x LTS, ahead of pnpm 11). Adds `pnpm.onlyBuiltDependencies` allowlist for the two native-binary helpers (`esbuild`, `unrs-resolver`) per pnpm 10's stricter default.
@@ -107,7 +111,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Feature parity with the upstream: `name`, `jsonMessage`, chronological sorting, retention policy, client injection, byte-aware batch splitting, `flush()`.
 - Dual ESM/CJS output via tsup, full TypeScript types.
 
-[Unreleased]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.3.1
 [1.3.0]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.3.0
 [1.2.0]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.2.0
 [1.1.0]: https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.1.0
