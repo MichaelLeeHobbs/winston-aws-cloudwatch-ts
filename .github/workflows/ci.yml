@@ -15,11 +15,11 @@ jobs:
         # regression that only appears on 20.9–20.12 still fails CI.
         node-version: [20.9.0, 22, 24]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -30,7 +30,7 @@ jobs:
 
       - run: pnpm run build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-node-${{ matrix.node-version }}
@@ -39,14 +39,14 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       # Dev tooling (ESLint 10, Prettier) requires Node >= 20.12 (util.styleText),
       # above the library's 20.9.0 runtime floor — so run it once on a modern
       # Node rather than across the runtime matrix above.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
