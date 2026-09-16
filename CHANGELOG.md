@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-16
+
+[GitHub Release](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.4.0)
+
+### Fixed
+
+- A CloudWatch initialization or delivery failure no longer detaches the transport from Winston. The relay can retry while subsequent records continue draining, preventing permanent logging loss and unbounded buffering inside Winston ([#11](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/pull/11)).
+
+### Changed
+
+- CloudWatch delivery failures now emit `warn` instead of the stream `error` event. Move delivery-failure listeners to `transport.on('warn', ...)` or `logger.on('warn', ...)`. Application overrides of `transport.emit` that redirect delivery errors are no longer needed. Other stream error behavior is unchanged.
+
+### Added
+
+- Real Winston regression tests cover recovery after initialization and delivery failures, repeated failures without event listeners, continued delivery with empty logger buffers, and explicit shutdown.
+
 ## [1.3.1] — 2026-05-19
 
 [GitHub Release](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/releases/tag/v1.3.1)
