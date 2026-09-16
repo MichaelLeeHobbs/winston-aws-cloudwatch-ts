@@ -6,7 +6,7 @@ CloudWatch transport and demonstrates the common patterns:
 - Transport setup (region, log group/stream, optional auto-create)
 - Basic logging and **structured metadata**
 - **Custom / JSON formatting**
-- **Error handling** via the transport's `error` event
+- **Delivery failure reporting** via the transport's `warn` event
 - **Graceful shutdown** (flush + close, including `SIGINT`/`SIGTERM`)
 
 See [`basic-usage.ts`](./basic-usage.ts).
@@ -62,6 +62,4 @@ Required IAM actions: `logs:PutLogEvents` (plus `logs:CreateLogGroup` and
 `logs:CreateLogStream` when `CW_CREATE=1`), and optionally
 `logs:PutRetentionPolicy`.
 
-Without credentials the app still runs: log lines print to the console, and the
-failed CloudWatch delivery is reported (once) via the transport's `error`
-event — it never crashes the process or blocks logging.
+Without credentials the app still runs: log lines print to the console, and failed CloudWatch delivery attempts are reported via the transport's `warn` event while the relay retries. Delivery warnings do not detach the transport or require an error listener.

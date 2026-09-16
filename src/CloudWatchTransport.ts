@@ -11,7 +11,7 @@ import Relay, { type RelayClient } from './Relay'
 // Stand-in callback for relay items. CloudWatch delivery is intentionally
 // decoupled from the Winston Writable stream (see `log()`), so the relay no
 // longer drives the stream's write callback — delivery success/failure is
-// surfaced via the relay's `'error'` event instead.
+// surfaced as transport warnings instead.
 const noop: LogCallback = (): void => undefined
 
 /**
@@ -93,9 +93,10 @@ export interface CloudWatchTransportOptions extends TransportStreamOptions {
 export default class CloudWatchTransport extends Transport {
   readonly name: string
   private readonly relay: Relay<LogItem>
-  // err is mutable by design since it's often enriched with additional context before being emitted, but we only read from it so we accept a mutable type for convenience
+  // A stream 'error' unpipes the transport and starts close(), defeating relay
+  // retries. Winston forwards 'warn' to the logger without changing the pipe.
   // eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
-  private readonly onRelayError = (err: Error): boolean => this.emit('error', err)
+  private readonly onRelayError = (err: Error): boolean => this.emit('warn', err)
 
   // Our properties are all readonly, but the TransportStreamOptions we extend from Winston is mutable by design, so we accept a mutable type for convenience
   // eslint-disable-next-line @typescript-eslint/prefer-readonly-parameter-types
@@ -168,7 +169,7 @@ export default class CloudWatchTransport extends Transport {
     // stream callback immediately. Bounded buffering / backpressure is the
     // relay queue's responsibility (maxQueueSize, oldest dropped on overflow) —
     // which only works if the upstream stream keeps draining. Delivery
-    // failures are reported via the relay's `'error'` event, not this callback.
+    // failures are reported via the transport's 'warn' event, not this callback.
     this.relay.submit({ date: Date.now(), level, message: msg, meta, callback: noop })
     callback(null)
   }

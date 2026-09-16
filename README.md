@@ -14,7 +14,7 @@ A modern TypeScript [Winston](https://www.npmjs.com/package/winston) transport f
 - **TypeScript** - Full TypeScript support with complete type definitions
 - **AWS SDK v3** - Uses the modern modular AWS SDK v3
 - **Rate Limiting** - Built-in throttling to respect CloudWatch API limits
-- **Bounded Memory** - Delivery is decoupled from Winston's stream; a CloudWatch outage can never stall the logger or leak memory
+- **Bounded Buffering** - A bounded delivery queue keeps Winston draining during CloudWatch failures
 - **Automatic Retries** - Handles sequence token errors automatically
 - **Customizable Formatting** - Flexible log formatting options
 - **JSON Formatting** - Optional structured JSON log output
@@ -176,20 +176,11 @@ out of memory. (This is the long-standing leak inherited from the original
 
 Practical implications:
 
-- **Memory is strictly bounded** by `maxQueueSize` (default `10000`),
-  regardless of CloudWatch availability. When the queue is full the **oldest**
-  queued log is dropped (reported to Winston as *not delivered*, never as an
-  `error`).
-- **`logger.info(...)` returning does not mean the log reached CloudWatch** —
-  only that it was accepted into the queue. Genuine delivery failures are
-  surfaced via the transport's [`error` event](#error-handling), not via the
-  logging call.
+- **The delivery queue holds at most `maxQueueSize` records** (default `10000`), regardless of CloudWatch availability. When full, the oldest queued log is dropped. This is a record-count limit, not a byte limit or a bound on total application memory.
+- **`logger.info(...)` returning does not mean the log reached CloudWatch**, only that it was accepted into the queue. Delivery failures are surfaced via the transport's [`warn` event](#error-handling), not via the logging call.
 - For maximum delivery on shutdown, `await transport.flush()` /
   `await transport.close()` (see [Graceful Shutdown](#graceful-shutdown)).
-- During a **persistent** outage a failing batch is retried with exponential
-  backoff (capped by `retryBackoffCap`) and, after `maxRetries` consecutive
-  failures, dropped — so an undeliverable head batch never head-of-line blocks
-  newer logs. Each failed attempt is surfaced as an `error` event.
+- During a **persistent** outage a failing batch is retried with exponential backoff (capped by `retryBackoffCap`) and, after `maxRetries` consecutive failures, dropped so newer logs can proceed. Each failed attempt is surfaced as a `warn` event.
 
 Tune the buffer with `maxQueueSize`, `batchSize`, `submissionInterval`,
 `maxRetries`, and `retryBackoffCap`.
@@ -203,11 +194,11 @@ Coming from another CloudWatch Winston transport? See our migration guides:
 
 ## Error Handling
 
-The transport emits an `error` event only when a CloudWatch submission fails
-with an unrecoverable error. Dropped logs (queue overflow or shutdown) are
-**not** emitted as errors, so they cannot crash a process that has no `error`
-listener. It's still recommended to subscribe to this event so genuine
-CloudWatch failures are surfaced:
+CloudWatch initialization and delivery failures emit `warn` on the transport. Winston forwards the same error to `logger.on('warn', (error, transport) => ...)`. These warnings leave the transport attached while the relay retries or drops failed batches. They do not require a listener to keep logging operational, but you should subscribe to observe delivery failures.
+
+**Upgrading from 1.3.1 or earlier:** move CloudWatch delivery-failure listeners from `transport.on('error', ...)` to `transport.on('warn', ...)`, or use the logger's `warn` event. Delivery failures no longer emit `error`. That stream event unpipes the transport, starts shutdown, and can leave subsequent records buffering indefinitely inside Winston. Application-level overrides of `transport.emit` that redirect delivery errors are no longer needed.
+
+Report warnings through `console` or another independent destination to avoid recursively feeding failures back into CloudWatch:
 
 ```typescript
 const transport = new CloudWatchTransport({
@@ -215,12 +206,14 @@ const transport = new CloudWatchTransport({
   logStreamName: 'my-stream'
 })
 
-transport.on('error', (error) => {
+transport.on('warn', (error) => {
   console.error('CloudWatch logging error:', error)
 })
 
 const logger = winston.createLogger({ transports: [transport] })
 ```
+
+Queue overflow and shutdown drops do not emit delivery warnings. Normal stream `error` events are unchanged; keep error handlers needed by other transports or stream failures.
 
 ## AWS Credentials
 

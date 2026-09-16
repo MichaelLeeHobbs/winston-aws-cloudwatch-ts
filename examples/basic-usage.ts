@@ -55,12 +55,10 @@ const cloudWatchTransport = new CloudWatchTransport({
   retryBackoffCap: 30_000,
 })
 
-// 2. Handle delivery errors. Recommended: a persistent CloudWatch failure
-//    (throttling, bad IAM, outage) surfaces here. It never crashes the app and
-//    never blocks logging — memory stays bounded by maxQueueSize.
-cloudWatchTransport.on('error', err => {
+// 2. Observe delivery failures without detaching the transport from Winston.
+cloudWatchTransport.on('warn', err => {
   // Use console here so logging-pipeline errors don't recurse through Winston.
-  console.error('[cloudwatch-transport error]', err instanceof Error ? err.message : err)
+  console.error('[cloudwatch delivery warning]', err instanceof Error ? err.message : err)
 })
 
 // 3. Build a logger. A Console transport is included so you can see output
@@ -73,10 +71,8 @@ const logger = winston.createLogger({
   ],
 })
 
-// Winston re-emits a transport's `error` on the Logger itself. Without a
-// listener here, Node would throw on the unhandled 'error' event. (The
-// transport-level handler above is still the recommended place to react to
-// CloudWatch delivery failures specifically.)
+// Handle stream errors separately. CloudWatch delivery warnings go to the
+// transport handler above and are also forwarded to logger's 'warn' event.
 logger.on('error', err => {
   console.error('[logger error]', err instanceof Error ? err.message : err)
 })

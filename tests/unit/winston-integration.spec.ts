@@ -1,14 +1,17 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals'
-import { CloudWatchLogsClient, PutLogEventsCommand } from '@aws-sdk/client-cloudwatch-logs'
+import {
+  CloudWatchLogsClient,
+  CreateLogGroupCommand,
+  PutLogEventsCommand,
+  type PutLogEventsCommandInput,
+} from '@aws-sdk/client-cloudwatch-logs'
 import { mockClient } from 'aws-sdk-client-mock'
 import winston from 'winston'
 
 import CloudWatchTransport from '../../src/CloudWatchTransport'
 
-// End-to-end behavioral tests through a real `winston.createLogger` (not just
-// raw `transport.write()` / `transport.log()`). Closes the "behavioral gap
-// despite 100% line coverage" finding from the deep review: nothing else in
-// the suite exercises the winston-transport → winston-Logger plumbing.
+// Delivery failures must leave the real Winston pipe attached and draining.
+// Direct transport.write() tests cannot detect logger detachment.
 
 const cwMock = mockClient(CloudWatchLogsClient)
 
@@ -17,27 +20,23 @@ function stopRelay(transport: CloudWatchTransport): void {
   ;(transport as unknown as { relay: { stop: () => void } }).relay.stop()
 }
 
-const waitUntil = async (predicate: () => boolean, timeoutMs = 3000): Promise<void> => {
-  const start = Date.now()
-  while (!predicate()) {
-    if (Date.now() - start > timeoutMs) return
-    await new Promise(resolve => setTimeout(resolve, 10))
-  }
-}
-
 describe('CloudWatchTransport end-to-end through a real winston.Logger', () => {
   let transport: CloudWatchTransport | undefined
+  let logger: winston.Logger | undefined
 
   beforeEach(() => {
     cwMock.reset()
     cwMock.onAnyCommand().resolves({})
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     if (transport) {
       stopRelay(transport)
+      await transport.close()
       transport = undefined
     }
+    logger?.close()
+    logger = undefined
   })
 
   it('routes a real Logger call through to PutLogEventsCommand with message + metadata intact', async () => {
@@ -46,8 +45,7 @@ describe('CloudWatchTransport end-to-end through a real winston.Logger', () => {
       logStreamName: 's',
       submissionInterval: 10,
     })
-    transport.on('error', () => {})
-    const logger = winston.createLogger({ level: 'info', transports: [transport] })
+    logger = winston.createLogger({ level: 'info', transports: [transport] })
 
     logger.info('hello world', { userId: 1234, action: 'login' })
     await transport.flush(2000)
@@ -76,8 +74,7 @@ describe('CloudWatchTransport end-to-end through a real winston.Logger', () => {
       logStreamName: 's',
       submissionInterval: 5,
     })
-    transport.on('error', () => {})
-    const logger = winston.createLogger({ level: 'info', transports: [transport] })
+    logger = winston.createLogger({ level: 'info', transports: [transport] })
 
     const start = Date.now()
     for (let i = 0; i < 100; i++) {
@@ -87,31 +84,100 @@ describe('CloudWatchTransport end-to-end through a real winston.Logger', () => {
     expect(elapsed).toBeLessThan(100)
   })
 
-  it('forwards a transport delivery error to logger.on("error") (gotcha: winston re-emits)', async () => {
-    cwMock.reset()
-    cwMock
-      .on(PutLogEventsCommand)
-      .rejects(Object.assign(new Error('throttled'), { name: 'ThrottlingException' }))
+  it.each(['CreateLogGroup', 'PutLogEvents'] as const)(
+    'keeps logging after a %s failure and reports it as a warning',
+    async failureStage => {
+      const failure = Object.assign(new Error('request timed out'), { name: 'TimeoutError' })
+      const delivered: string[] = []
+      const accept = (input: PutLogEventsCommandInput): Record<string, never> => {
+        for (const event of input.logEvents ?? []) delivered.push(event.message!)
+        return {}
+      }
+      cwMock.on(PutLogEventsCommand).callsFake(accept)
+      if (failureStage === 'CreateLogGroup') {
+        cwMock.on(CreateLogGroupCommand).rejectsOnce(failure).resolves({})
+      } else {
+        cwMock.on(PutLogEventsCommand).rejectsOnce(failure).callsFake(accept)
+      }
+      transport = new CloudWatchTransport({
+        logGroupName: 'g',
+        logStreamName: 's',
+        createLogGroup: true,
+        submissionInterval: 1,
+        retryBackoffCap: 0,
+        formatLog: item => item.message,
+      })
+      const closeSpy = jest.fn()
+      const unpipeSpy = jest.fn()
+      const transportWarning = jest.fn()
+      const loggerWarning = jest.fn()
+      const loggerError = jest.fn()
+      transport.on('close', closeSpy)
+      transport.on('unpipe', unpipeSpy)
+      transport.on('warn', transportWarning)
+      logger = winston.createLogger({ transports: [transport] })
+      logger.on('warn', loggerWarning)
+      // Keep the old implementation's error observable while checking detachment.
+      logger.on('error', loggerError)
+
+      logger.info('startup')
+      await transport.flush(2000)
+      // Let an erroneous async close settle before checking continued delivery.
+      await new Promise(resolve => setImmediate(resolve))
+      expect(delivered).toEqual(['startup'])
+      expect(logger.transports).toHaveLength(1)
+      expect(logger.transports[0]).toBe(transport)
+
+      const later = Array.from({ length: 50 }, (_, i) => `after recovery ${i}`)
+      for (const message of later) logger.info(message)
+      await transport.flush(2000)
+      expect(delivered).toEqual(['startup', ...later])
+      expect(logger.readableLength).toBe(0)
+      expect(logger.writableLength).toBe(0)
+      expect(logger.transports).toHaveLength(1)
+      expect(logger.transports[0]).toBe(transport)
+      expect(transportWarning.mock.calls).toEqual([[failure]])
+      expect(loggerWarning.mock.calls).toEqual([[failure, transport]])
+      expect(loggerError).not.toHaveBeenCalled()
+      expect(closeSpy).not.toHaveBeenCalled()
+      expect(unpipeSpy).not.toHaveBeenCalled()
+    }
+  )
+
+  it('drops failed batches and keeps draining without error or warning listeners', async () => {
+    cwMock.on(PutLogEventsCommand).rejects(new Error('CloudWatch unavailable'))
     transport = new CloudWatchTransport({
       logGroupName: 'g',
       logStreamName: 's',
-      submissionInterval: 5,
-      maxRetries: 1,
+      submissionInterval: 1,
+      batchSize: 1,
+      maxRetries: 2,
       retryBackoffCap: 0,
+      formatLog: item => item.message,
     })
-    const transportErrorSpy = jest.fn()
-    transport.on('error', transportErrorSpy)
-    const logger = winston.createLogger({ level: 'info', transports: [transport] })
-    // MUST attach before the relay surfaces the error — winston re-emits the
-    // transport's `error` on the Logger itself, and Node's EventEmitter throws
-    // on emit('error') with no listener. This is the crash we hit while
-    // building examples/basic-usage.ts.
-    const loggerErrorSpy = jest.fn()
-    logger.on('error', loggerErrorSpy)
+    logger = winston.createLogger({ transports: [transport] })
 
-    logger.info('this will fail')
-    await waitUntil(() => transportErrorSpy.mock.calls.length > 0)
-    expect(transportErrorSpy).toHaveBeenCalled()
-    expect(loggerErrorSpy).toHaveBeenCalled()
+    for (const message of ['first', 'second']) {
+      logger.info(message)
+      await transport.flush(2000)
+      await new Promise(resolve => setImmediate(resolve))
+      expect(logger.transports).toHaveLength(1)
+      expect(logger.transports[0]).toBe(transport)
+      expect(logger.readableLength).toBe(0)
+      expect(logger.writableLength).toBe(0)
+    }
+    const attempts = cwMock.commandCalls(PutLogEventsCommand)
+    expect(attempts.map(call => call.args[0].input.logEvents?.[0]?.message)).toEqual([
+      'first',
+      'first',
+      'second',
+      'second',
+    ])
+
+    const closed = jest.fn()
+    transport.on('close', closed)
+    await transport.close()
+    expect(closed).toHaveBeenCalled()
+    expect(logger.transports).toHaveLength(0)
   })
 })

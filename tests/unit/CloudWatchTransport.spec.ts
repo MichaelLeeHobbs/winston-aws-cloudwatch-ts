@@ -154,19 +154,19 @@ describe('CloudWatchTransport', () => {
     expect(mockFlush).toHaveBeenCalledWith(5000)
   })
 
-  it('forwards error events from relay', () => {
+  it('forwards relay errors as transport warnings', () => {
     const transport = new CloudWatchTransport({
       logGroupName: 'test-group',
       logStreamName: 'test-stream',
     })
-    const errorSpy = jest.fn()
-    transport.on('error', errorSpy)
+    const warningSpy = jest.fn()
+    transport.on('warn', warningSpy)
 
     // Trigger error on the relay (which is an EventEmitter)
     const relay = (transport as any).relay
     const testError = new Error('test error')
     relay.emit('error', testError)
 
-    expect(errorSpy).toHaveBeenCalledWith(testError)
+    expect(warningSpy).toHaveBeenCalledWith(testError)
   })
 })

@@ -33,7 +33,7 @@ npm install @ubercode/winston-cloudwatch
 | `jsonMessage`                              | `jsonMessage`                                    | Same                                            |
 | `messageFormatter`                         | `formatLog`                                      | Same concept, slightly different signature       |
 | `retentionInDays`                          | `retentionInDays`                                | Same                                            |
-| `errorHandler`                             | `transport.on('error', handler)`                 | Use Winston's built-in event system             |
+| `errorHandler`                             | `transport.on('warn', handler)`                  | Observe delivery failures without unpiping      |
 | `cloudWatchLogs`                           | `cloudWatchLogs`                                 | Bring your own client (now AWS SDK v3)          |
 | `logGroupName` (function)                  | `logGroupName` (string only)                     | Dynamic names not supported; use static strings |
 | `logStreamName` (function)                 | `logStreamName` (string only)                    | Dynamic names not supported; use static strings |
@@ -82,7 +82,7 @@ const transport = new CloudWatchTransport({
   }
 })
 
-transport.on('error', (err) => console.error('CW error', err))
+transport.on('warn', (err) => console.error('CW error', err))
 
 const logger = winston.createLogger({ transports: [transport] })
 ```
@@ -97,14 +97,6 @@ const logger = winston.createLogger({ transports: [transport] })
 - **AWS SDK v3** — Modular, tree-shakeable, actively maintained
 - **Automatic log group/stream creation** — Set `createLogGroup: true` and `createLogStream: true`
 
-## Delivery & Backpressure Semantics (v1.2.0+)
+## Delivery & Backpressure Semantics
 
-**Behavior change to be aware of:** delivery is decoupled from Winston's
-writable stream. A logging call returning means the entry was accepted into a
-**bounded** in-memory queue (`maxQueueSize`), _not_ that it reached CloudWatch.
-Delivery happens asynchronously; a persistent outage can never stall the logger
-or leak memory (oldest logs dropped on overflow; an undeliverable head batch is
-dropped after `maxRetries`). Genuine failures surface via the transport's
-`error` event. See the README's
-[Backpressure & Delivery Semantics](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/README.md#backpressure--delivery-semantics)
-for the full contract.
+Delivery is decoupled from Winston's writable stream. A logging call returning means the entry was accepted into a queue bounded by `maxQueueSize`, not that it reached CloudWatch. Delivery happens asynchronously; the oldest logs are dropped on overflow, and a failing batch is dropped after `maxRetries`. Delivery failures emit `warn` so the transport stays attached while retrying. Versions through 1.3.1 used `error`; move delivery-failure listeners to `warn` when upgrading. See the README's [Backpressure & Delivery Semantics](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/README.md#backpressure--delivery-semantics) for the full contract.
