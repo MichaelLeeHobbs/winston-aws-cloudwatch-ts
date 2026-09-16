@@ -100,14 +100,6 @@ The only change needed is removing `submissionRetryCount` (retries are now autom
 - **Max queue size** — Set `maxQueueSize` to bound memory usage (oldest items dropped when full)
 - **Custom transport name** — Set `name` for Winston transport identification
 
-## Delivery & Backpressure Semantics (v1.2.0+)
+## Delivery & Backpressure Semantics
 
-**Behavior change to be aware of:** delivery is decoupled from Winston's
-writable stream. A logging call returning means the entry was accepted into a
-**bounded** in-memory queue (`maxQueueSize`), _not_ that it reached CloudWatch.
-Delivery happens asynchronously; a persistent outage can never stall the logger
-or leak memory (oldest logs dropped on overflow; an undeliverable head batch is
-dropped after `maxRetries`). Genuine failures surface via the transport's
-`error` event. See the README's
-[Backpressure & Delivery Semantics](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/README.md#backpressure--delivery-semantics)
-for the full contract.
+Delivery is decoupled from Winston's writable stream. A logging call returning means the entry was accepted into a queue bounded by `maxQueueSize`, not that it reached CloudWatch. Delivery happens asynchronously; the oldest logs are dropped on overflow, and a failing batch is dropped after `maxRetries`. Delivery failures emit `warn` so the transport stays attached while retrying. Versions through 1.3.1 used `error`; move delivery-failure listeners to `warn` when upgrading. See the README's [Backpressure & Delivery Semantics](https://github.com/MichaelLeeHobbs/winston-aws-cloudwatch-ts/blob/master/README.md#backpressure--delivery-semantics) for the full contract.
